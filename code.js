@@ -60,11 +60,31 @@ function setup() {
 function doGet(e) {
   var p = (e && e.parameter) || {};
   return handle_(function () {
-    if (p.action === 'rooms') return { rooms: getRooms_(), settings: getSettings_() };
-    if (p.action === 'room') return getRoom_(p.room);
-    if (p.action === 'all') return { rooms: getRooms_(), settings: getSettings_(), students: getStudents_() };
+    if (p.action === 'rooms') return cached_('rooms', function () { return { rooms: getRooms_(), settings: getSettings_() }; });
+    if (p.action === 'room') return cached_('room:' + str_(p.room), function () { return getRoom_(p.room); });
+    if (p.action === 'all') return cached_('all', function () { return { rooms: getRooms_(), settings: getSettings_(), students: getStudents_() }; });
     return { message: 'API พร้อมใช้งาน' };
   });
+}
+
+// ---------------- cache (ลดการอ่านชีตเมื่อหลายคนเปิดพร้อมกัน) ----------------
+var CACHE_SECONDS = 300;
+
+function cached_(key, fn) {
+  var cache = CacheService.getScriptCache();
+  var hit = cache.get(key);
+  if (hit) return JSON.parse(hit);
+  var value = fn();
+  try { cache.put(key, JSON.stringify(value), CACHE_SECONDS); } catch (e) { /* ใหญ่เกิน 100KB ก็ไม่ cache */ }
+  return value;
+}
+
+// ไม่ระบุห้อง = ล้างทุกห้อง (ใช้ตอนแก้ข้อมูลผู้ลงนาม เพราะข้อมูลรายห้องแนบ settings ไปด้วย)
+function clearCache_(room) {
+  var keys = ['rooms', 'all'];
+  if (room) keys.push('room:' + room);
+  else getRooms_().forEach(function (r) { keys.push('room:' + r.room); });
+  CacheService.getScriptCache().removeAll(keys);
 }
 
 function doPost(e) {
@@ -200,6 +220,8 @@ function saveRoom_(d) {
     TEXT_COLS.Rooms.forEach(function (c) { rs.getRange(target, c).setNumberFormat('@'); });
     rs.getRange(target, 1, 1, row.length).setValues([row]);
 
+    SpreadsheetApp.flush();
+    clearCache_(room);
     return { savedAt: now, count: list.length, room: roomFromRow_(row) };
   } finally {
     lock.releaseLock();
@@ -224,6 +246,8 @@ function saveSettings_(d) {
       sh.getRange(target, 1, 1, 3).setValues([[key, s[1], value]]);
       if (idx < 0) rr.push([key, s[1], value]);
     });
+    SpreadsheetApp.flush();
+    clearCache_();
     return { settings: getSettings_() };
   } finally {
     lock.releaseLock();

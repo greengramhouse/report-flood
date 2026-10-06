@@ -130,15 +130,33 @@
   }
 
   // ---------------- API ----------------
-  function getJSON(url) {
-    return fetch(url).then(function (r) {
-      if (!r.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับ ' + r.status);
-      return r.json();
-    });
+  // GET พร้อม timeout และลองใหม่อัตโนมัติ (Apps Script ตอบช้า/ต่อคิวเมื่อหลายคนเปิดพร้อมกัน)
+  function getJSON(url, opts) {
+    opts = opts || {};
+    var tries = opts.tries || 3, timeout = opts.timeout || 30000;
+    var attempt = function (n) {
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeout) : null;
+      return fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function (r) {
+        if (!r.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับ ' + r.status);
+        return r.json();
+      }).then(function (j) {
+        clearTimeout(timer);
+        return j;
+      }, function (err) {
+        clearTimeout(timer);
+        if (n + 1 >= tries) throw (err && err.name === 'AbortError') ? new Error('เซิร์ฟเวอร์ตอบช้าเกินไป') : err;
+        if (opts.onRetry) opts.onRetry(n + 1);
+        // รอแบบสุ่มเล็กน้อย กันทุกเครื่องยิงซ้ำพร้อมกัน
+        return new Promise(function (res) { setTimeout(res, 1000 * (n + 1) + Math.random() * 1000); })
+          .then(function () { return attempt(n + 1); });
+      });
+    };
+    return attempt(0);
   }
-  function apiGet(params) {
+  function apiGet(params, opts) {
     var q = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
-    return getJSON(API_URL + (API_URL.indexOf('?') >= 0 ? '&' : '?') + q).then(checkOk);
+    return getJSON(API_URL + (API_URL.indexOf('?') >= 0 ? '&' : '?') + q, opts).then(checkOk);
   }
   function apiPost(body) {
     // ส่งเป็น text/plain เพื่อไม่ให้เกิด CORS preflight กับ Apps Script
@@ -150,6 +168,15 @@
   function checkOk(j) {
     if (!j || !j.ok) throw new Error((j && j.error) || 'เกิดข้อผิดพลาด');
     return j;
+  }
+
+  // ---------------- cache ในเครื่อง (เปิดครั้งต่อไปแสดงห้องได้ทันที) ----------------
+  var ROSTER_KEY = 'flood:roster:v1:' + STUDENT_API_URL;
+  function readCache(key) {
+    try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; }
+  }
+  function writeCache(key, v) {
+    try { localStorage.setItem(key, JSON.stringify(v)); } catch (e) { /* เต็มหรือถูกปิดไว้ ไม่เป็นไร */ }
   }
 
   // ---------------- โหลดเริ่มต้น ----------------
@@ -172,33 +199,58 @@
     });
   }
 
+  function loadingHtml(text) {
+    return '<div class="flex items-center gap-2 text-muted"><span class="spin"></span>' + esc(text) + '</div>';
+  }
+
+  function setRoster(roster) {
+    state.roster = roster;
+    state.roomOrder = [];
+    state.rosterCount = {};
+    roster.forEach(function (s) {
+      if (!state.rosterCount[s.room]) { state.rosterCount[s.room] = 0; state.roomOrder.push(s.room); }
+      state.rosterCount[s.room]++;
+    });
+  }
+
   function loadRoster() {
     if (!STUDENT_API_URL) return Promise.reject(new Error('ยังไม่ได้ตั้ง STUDENT_API_URL ใน config.js'));
-    return getJSON(STUDENT_API_URL).then(function (list) {
+    var hadRoster = state.roster.length > 0;
+    return getJSON(STUDENT_API_URL, {
+      onRetry: function (n) {
+        if (!state.roster.length) el.roomGrid.innerHTML = loadingHtml('เซิร์ฟเวอร์รายชื่อตอบช้า กำลังลองใหม่ (ครั้งที่ ' + n + ')…');
+      }
+    }).then(function (list) {
       if (!Array.isArray(list)) throw new Error('รูปแบบข้อมูลรายชื่อนักเรียนไม่ถูกต้อง');
-      state.roster = list.map(function (s) {
+      var roster = list.map(function (s) {
         var room = String(s.classroom || '').trim();
         return {
           room: room, no: Number(s.no) || 0, schoolId: String(s.student_id == null ? '' : s.student_id),
           citizenId: cleanId(s.citizen_id), name: fullName(s)
         };
       }).filter(function (s) { return s.room; });
-      state.roomOrder = [];
-      state.rosterCount = {};
-      state.roster.forEach(function (s) {
-        if (!state.rosterCount[s.room]) { state.rosterCount[s.room] = 0; state.roomOrder.push(s.room); }
-        state.rosterCount[s.room]++;
-      });
+      var changed = JSON.stringify(roster) !== JSON.stringify(state.roster);
+      writeCache(ROSTER_KEY, { savedAt: Date.now(), roster: roster });
+      state.rosterLoaded = true;
+      if (changed || !roster.length) {
+        setRoster(roster);
+        renderRoomGrid();
+        renderStatus();
+        if (hadRoster && state.room) $('roomMeta').textContent = (state.rosterCount[state.room] || 0) + ' คนในรายชื่อ';
+      }
     });
   }
 
   function loadRooms() {
-    if (!API_URL) return Promise.resolve();
+    if (!API_URL) { state.roomsLoaded = true; return Promise.resolve(); }
     return apiGet({ action: 'rooms' }).then(function (res) {
       state.rooms = {};
       (res.rooms || []).forEach(function (r) { state.rooms[r.room] = r; });
       state.settings = res.settings || {};
+      state.roomsLoaded = true;
       fillSettings();
+      renderRoomGrid();
+      renderStatus();
     });
   }
 
@@ -208,23 +260,36 @@
     return list;
   }
 
+  function showRosterError(err) {
+    el.roomGrid.innerHTML = '<div class="flex flex-wrap items-center gap-3 text-danger">โหลดรายชื่อนักเรียนไม่สำเร็จ (' + esc(err.message) + ')' +
+      '<button type="button" class="btn btn-ghost btn-sm" id="retryRoster">ลองอีกครั้ง</button></div>';
+    $('retryRoster').addEventListener('click', function () {
+      el.roomGrid.innerHTML = loadingHtml('กำลังโหลดรายชื่อนักเรียน…');
+      loadRoster().catch(showRosterError);
+    });
+  }
+
   function start() {
     showBanner();
     applyOfflineState();
     $('schoolDate').value = todayISO();
-    el.roomGrid.innerHTML = '<div class="flex items-center gap-2 text-muted"><span class="spin"></span>กำลังโหลดรายชื่อนักเรียน…</div>';
-    var roomsP = loadRooms().catch(function (err) {
-      toast('โหลดสถานะการส่งไม่สำเร็จ: ' + err.message, 'error');
-    });
-    loadRoster().then(function () {
-      return roomsP;
-    }).then(function () {
+    // 1) ใช้รายชื่อที่จำไว้ในเครื่องก่อน (ถ้ามี) ห้องจะขึ้นทันที
+    var cached = readCache(ROSTER_KEY);
+    if (cached && Array.isArray(cached.roster) && cached.roster.length) {
+      setRoster(cached.roster);
       renderRoomGrid();
-      renderStatus();
-    }).catch(function (err) {
-      el.roomGrid.innerHTML = '<div class="col-span-full flex flex-wrap items-center gap-3 text-danger">โหลดรายชื่อนักเรียนไม่สำเร็จ (' + esc(err.message) + ')' +
-        '<button type="button" class="btn btn-ghost btn-sm" id="retryRoster">ลองอีกครั้ง</button></div>';
-      $('retryRoster').addEventListener('click', start);
+    } else {
+      el.roomGrid.innerHTML = loadingHtml('กำลังโหลดรายชื่อนักเรียน…');
+    }
+    // 2) โหลดรายชื่อล่าสุดและสถานะการส่งแยกกัน ไม่ต้องรอกัน
+    loadRoster().catch(function (err) {
+      if (!state.roster.length) showRosterError(err);
+    });
+    loadRooms().catch(function (err) {
+      $('statusCount').textContent = '';
+      state.roomsFailed = true;
+      renderRoomGrid();
+      toast('โหลดสถานะการส่งไม่สำเร็จ: ' + err.message + ' (กด "โหลดใหม่" ในหน้าสรุปได้)', 'error');
     });
   }
 
@@ -232,10 +297,12 @@
   function roomStatusHtml(room) {
     var r = state.rooms[room];
     if (r) return '<span class="rs text-ok">✓ ส่งแล้ว · ' + r.count + ' คน</span>';
+    if (!state.roomsLoaded) return '<span class="rs text-muted">' + (state.roomsFailed ? '–' : 'กำลังตรวจสถานะ…') + '</span>';
     return '<span class="rs text-muted">ยังไม่ส่ง</span>';
   }
 
   function renderRoomGrid() {
+    if (!state.roster.length && !state.rosterLoaded) return; // ยังรอรายชื่อ (คงข้อความกำลังโหลดไว้)
     var rooms = allRooms();
     if (!rooms.length) {
       el.roomGrid.innerHTML = '<p class="text-muted">ไม่พบห้องเรียนในรายชื่อนักเรียน</p>';
@@ -259,7 +326,7 @@
   function isHit(r) { return r.book || r.supplies || r.uniform; }
 
   function chooseRoom(room) {
-    if (room === state.room) return;
+    if (room === state.room && !state.roomUnverified) return;
     var go = function () {
       state.room = room;
       state.dirty = false;
@@ -278,20 +345,35 @@
       $('teacherPhone').value = meta.teacherPhone || '';
       $('reportDate').value = isoOrToday(meta.reportDate);
       state.rows = rosterRows(room);
-      if (API_URL && state.rooms[room]) {
+      // ถ้ายังไม่รู้สถานะการส่ง ต้องโหลดข้อมูลห้องก่อนเสมอ กันบันทึกทับของเดิมโดยไม่ตั้งใจ
+      if (API_URL && (state.rooms[room] || !state.roomsLoaded)) {
         el.rows.innerHTML = '<div class="flex items-center gap-2 px-4 py-8 text-muted"><span class="spin"></span>กำลังโหลดข้อมูลที่บันทึกไว้…</div>';
         updateSummary();
-        apiGet({ action: 'room', room: room }).then(function (res) {
+        state.roomUnverified = false;
+        apiGet({ action: 'room', room: room }, {
+          onRetry: function (n) {
+            if (state.room === room) el.rows.innerHTML = '<div class="flex items-center gap-2 px-4 py-8 text-muted"><span class="spin"></span>เซิร์ฟเวอร์ตอบช้า กำลังลองใหม่ (ครั้งที่ ' + n + ')…</div>';
+          }
+        }).then(function (res) {
           if (state.room !== room) return;
           mergeSaved(res.students || []);
-          if (res.room) state.rooms[room] = res.room;
+          if (res.room) {
+            state.rooms[room] = res.room;
+            if (!$('teacherName').value) $('teacherName').value = res.room.teacherName || '';
+            if (!$('teacherPhone').value) $('teacherPhone').value = res.room.teacherPhone || '';
+            if (res.room.reportDate) $('reportDate').value = isoOrToday(res.room.reportDate);
+            renderRoomGrid();
+          }
           if (res.settings) { state.settings = res.settings; fillSettings(); }
           renderRows();
         }).catch(function (err) {
+          if (state.room !== room) return;
+          state.roomUnverified = true;
           renderRows();
-          toast('โหลดข้อมูลที่บันทึกไว้ไม่สำเร็จ: ' + err.message, 'error');
+          toast('โหลดข้อมูลที่บันทึกไว้ไม่สำเร็จ: ' + err.message + ' — ลองเลือกห้องใหม่อีกครั้ง', 'error');
         });
       } else {
+        state.roomUnverified = false;
         renderRows();
       }
       var chip = el.roomGrid.querySelector('[aria-pressed="true"]');
@@ -563,6 +645,7 @@
       withBusy($('saveRoom'), 'กำลังบันทึก…', apiPost({ action: 'save', data: data })).then(function (res) {
         state.dirty = false;
         state.rooms[data.room] = res.room;
+        state.roomUnverified = false;
         renderRoomGrid();
         renderStatus();
         toast('บันทึกห้อง ' + data.room + ' แล้ว (' + res.count + ' คน)', 'ok');
@@ -570,7 +653,9 @@
         toast('บันทึกไม่สำเร็จ: ' + err.message, 'error');
       });
     };
-    if (!data.students.length) {
+    if (state.roomUnverified) {
+      confirmBox('ยังโหลดข้อมูลเดิมของห้องนี้ไม่ได้', 'ถ้าห้อง ' + data.room + ' เคยบันทึกไว้แล้ว การบันทึกตอนนี้จะเขียนทับข้อมูลเดิม แนะนำให้กดเลือกห้องใหม่อีกครั้งก่อน', 'บันทึกทับ').then(function (ok) { if (ok) run(); });
+    } else if (!data.students.length) {
       confirmBox('ไม่มีนักเรียนได้รับผลกระทบ?', 'ยังไม่ได้ติ๊กใครเลย ถ้ากดบันทึก ระบบจะรายงานว่าห้อง ' + data.room + ' ไม่มีนักเรียนได้รับผลกระทบ', 'บันทึกว่าไม่มี').then(function (ok) { if (ok) run(); });
     } else if (!data.teacherName) {
       confirmBox('ยังไม่ได้กรอกชื่อครูผู้รายงาน', 'บันทึกต่อได้ แต่ช่องผู้รายงานในไฟล์ Excel จะเป็นจุดไข่ปลา', 'บันทึกต่อ').then(function (ok) { if (ok) run(); });

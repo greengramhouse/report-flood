@@ -7,6 +7,8 @@
 <link rel="icon" type="image/png" href="assets/favicon.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <meta name="description" content="แบบรายงานนักเรียนที่ได้รับผลกระทบ กรณีประสบเหตุอุทกภัย (งบเงินอุดหนุน) สพป.สระบุรี เขต 2">
+<link rel="preconnect" href="https://script.google.com">
+<link rel="preconnect" href="https://script.googleusercontent.com" crossorigin>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anuphan:wght@500;600;700&family=Sarabun:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
@@ -164,22 +166,7 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }
 </style>
-<script src="https://cdn.tailwindcss.com/3.4.16"></script>
-<script>
-  tailwind.config = {
-    theme: {
-      extend: {
-        colors: {
-          bg: 'var(--bg)', surface: 'var(--surface)', ink: 'var(--ink)', muted: 'var(--muted)', line: 'var(--line)',
-          accent: 'var(--accent)', 'accent-soft': 'var(--accent-soft)', paper: 'var(--paper)', 'paper-ink': 'var(--paper-ink)',
-          danger: 'var(--danger)', 'danger-soft': 'var(--danger-soft)', warn: 'var(--warn)', 'warn-soft': 'var(--warn-soft)',
-          ok: 'var(--ok)', 'ok-soft': 'var(--ok-soft)'
-        },
-        fontFamily: { display: 'var(--font-display)', body: 'var(--font-body)', mono: 'var(--font-mono)' }
-      }
-    }
-  };
-</script>
+<link rel="stylesheet" href="assets/tailwind.css">
 </head>
 <body class="min-h-screen">
 
