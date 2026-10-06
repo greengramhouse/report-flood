@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>สำรวจผลกระทบอุทกภัย</title>
+<meta name="description" content="แบบรายงานนักเรียนที่ได้รับผลกระทบ กรณีประสบเหตุอุทกภัย (งบเงินอุดหนุน) สพป.สระบุรี เขต 2">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Anuphan:wght@500;600;700&family=Sarabun:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  /* Layout: 2 มุมมอง (กรอกรายห้อง / สรุปทั้งโรงเรียน) คอลัมน์เดียว ; แถบสรุป+ปุ่มติดล่างจอ ; หัวตารางสีอำพันแบบเดียวกับแบบฟอร์ม Excel */
+  :root {
+    --bg: #f3f5f7;
+    --surface: #ffffff;
+    --ink: #17222c;
+    --muted: #5b6875;
+    --line: #d8dee4;
+    --accent: #0e5a78;       /* น้ำ */
+    --accent-soft: #e2eff5;
+    --accent-ink: #ffffff;
+    --paper: #fde9a8;        /* หัวตารางแบบฟอร์มราชการ */
+    --paper-ink: #3d2f05;
+    --hit: #f2f8fb;          /* แถวที่ติ๊กแล้ว */
+    --danger: #b42318;
+    --danger-soft: #fdecea;
+    --warn: #8a5a00;
+    --warn-soft: #fff4d6;
+    --ok: #1f7a4a;
+    --ok-soft: #e3f4ea;
+    --font-display: "Anuphan", "Sarabun", "Leelawadee UI", "Tahoma", sans-serif;
+    --font-body: "Sarabun", "Leelawadee UI", "Tahoma", sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, "Consolas", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f161c; --surface: #17212a; --ink: #e6edf3; --muted: #9aa8b5; --line: #2b3946;
+      --accent: #5cb8dc; --accent-soft: #15303d; --accent-ink: #06202b;
+      --paper: #4a3d12; --paper-ink: #fbe7a3; --hit: #142834;
+      --danger: #ff8a7a; --danger-soft: #3a1915; --warn: #f2c25b; --warn-soft: #33290f;
+      --ok: #6fd39c; --ok-soft: #12301f;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f161c; --surface: #17212a; --ink: #e6edf3; --muted: #9aa8b5; --line: #2b3946;
+    --accent: #5cb8dc; --accent-soft: #15303d; --accent-ink: #06202b;
+    --paper: #4a3d12; --paper-ink: #fbe7a3; --hit: #142834;
+    --danger: #ff8a7a; --danger-soft: #3a1915; --warn: #f2c25b; --warn-soft: #33290f;
+    --ok: #6fd39c; --ok-soft: #12301f;
+    color-scheme: dark;
+  }
+  [hidden] { display: none !important; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-body); font-size: 16px; line-height: 1.6; }
+  h1, h2, h3 { font-family: var(--font-display); text-wrap: balance; }
+  .num { font-variant-numeric: tabular-nums; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .field {
+    width: 100%; min-width: 0; background: var(--surface); color: var(--ink);
+    border: 1px solid var(--line); border-radius: 6px; padding: .45rem .65rem; font: inherit;
+  }
+  .field:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px var(--accent-soft); }
+  .field[aria-invalid="true"] { border-color: var(--danger); background: var(--danger-soft); }
+  .mono { font-family: var(--font-mono); letter-spacing: .02em; }
+
+  /* แท็บ */
+  .tab { padding: .6rem .25rem; border-bottom: 3px solid transparent; font-family: var(--font-display); font-weight: 600; color: var(--muted); }
+  .tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
+  .tab:hover { color: var(--ink); }
+
+  /* ปุ่มเลือกห้อง */
+  .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: .6rem; }
+  .room-btn { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .7rem .85rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
+  .room-btn:hover { border-color: var(--accent); }
+  .room-btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
+  .room-btn .rn { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; line-height: 1.3; }
+  .room-btn .rs { font-size: .8rem; }
+
+  /* ตารางนักเรียน: กริดบนจอกว้าง, การ์ดบนมือถือ */
+  .st-grid { display: grid; grid-template-columns: 2.5rem minmax(10.5rem,1.1fr) minmax(12rem,2fr) repeat(3, 5.5rem) minmax(7rem,1fr) 2.5rem; gap: .5rem; align-items: center; }
+  .st-head { background: var(--paper); color: var(--paper-ink); font-weight: 600; font-size: .9rem; padding: .55rem .75rem; }
+  .st-head .c { text-align: center; }
+  .st-row { padding: .45rem .75rem; border-bottom: 1px solid var(--line); }
+  .st-row:last-child { border-bottom: 0; }
+  .st-row.hit { background: var(--hit); }
+  .st-row .lbl { display: none; }
+  .st-row .txt { min-width: 0; overflow-wrap: anywhere; }
+  .tag { display: inline-block; font-size: .72rem; font-weight: 600; border-radius: 4px; padding: 0 .35rem; vertical-align: middle; }
+  .chk { display: flex; justify-content: center; }
+  .chk input { width: 1.3rem; height: 1.3rem; accent-color: var(--accent); cursor: pointer; }
+  .row-msg { grid-column: 2 / -1; font-size: .85rem; }
+  @media (max-width: 860px) {
+    .st-head { display: none; }
+    .st-grid { grid-template-columns: 1fr 1fr 1fr; }
+    .st-row { position: relative; padding: .85rem .9rem 1rem; }
+    .st-row .no { display: none; }
+    .st-row .nm { grid-column: 1 / -1; order: -2; font-weight: 600; padding-right: 2.5rem; }
+    .st-row .id { grid-column: 1 / -1; order: -1; }
+    .st-row .nt { grid-column: 1 / -1; }
+    .st-row .lbl { display: block; font-size: .8rem; color: var(--muted); font-weight: 400; }
+    .st-row .nm > .lbl { display: none; }
+    .chk { flex-direction: column; align-items: center; justify-content: space-between; align-self: stretch; gap: .15rem; background: var(--bg); border-radius: 6px; padding: .4rem .25rem; }
+    .chk .lbl { text-align: center; line-height: 1.2; }
+    .st-row .del { position: absolute; top: .55rem; right: .6rem; }
+    .row-msg { grid-column: 1 / -1; }
+  }
+
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; border-radius: 6px; padding: .55rem 1rem; font-family: var(--font-display); font-weight: 600; border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
+  .btn:disabled { opacity: .55; cursor: not-allowed; }
+  .btn-primary { background: var(--accent); color: var(--accent-ink); }
+  .btn-primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--line); }
+  .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+  .btn-sm { padding: .3rem .7rem; font-size: .9rem; }
+  .icon-btn { width: 2.25rem; height: 2.25rem; display: inline-grid; place-items: center; border-radius: 6px; color: var(--muted); background: transparent; border: 0; cursor: pointer; }
+  .icon-btn:hover { color: var(--danger); background: var(--danger-soft); }
+
+  dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; background: var(--surface); color: var(--ink); width: min(30rem, calc(100vw - 2rem)); }
+  dialog::backdrop { background: rgb(10 20 30 / .45); }
+
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(6rem + env(safe-area-inset-bottom, 0px)); z-index: 50; padding: .65rem 1rem; border-radius: 8px; font-weight: 500; box-shadow: 0 10px 24px rgb(0 0 0 / .18); max-width: calc(100vw - 2rem); }
+  .spin { display: inline-block; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }
+</style>
+<script src="https://cdn.tailwindcss.com/3.4.16"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          bg: 'var(--bg)', surface: 'var(--surface)', ink: 'var(--ink)', muted: 'var(--muted)', line: 'var(--line)',
+          accent: 'var(--accent)', 'accent-soft': 'var(--accent-soft)', paper: 'var(--paper)', 'paper-ink': 'var(--paper-ink)',
+          danger: 'var(--danger)', 'danger-soft': 'var(--danger-soft)', warn: 'var(--warn)', 'warn-soft': 'var(--warn-soft)',
+          ok: 'var(--ok)', 'ok-soft': 'var(--ok-soft)'
+        },
+        fontFamily: { display: 'var(--font-display)', body: 'var(--font-body)', mono: 'var(--font-mono)' }
+      }
+    }
+  };
+</script>
+</head>
+<body class="min-h-screen">
+
+<header class="border-b border-line bg-surface">
+  <div class="mx-auto max-w-6xl px-4 pt-5 sm:pt-7">
+    <p class="text-sm font-medium tracking-wide text-accent">สพป.สระบุรี เขต 2 · งบเงินอุดหนุน</p>
+    <h1 class="mt-1 text-2xl font-bold leading-tight sm:text-3xl">แบบรายงานนักเรียนที่ได้รับผลกระทบจากอุทกภัย</h1>
+    <p class="mt-1 text-muted"><span id="schoolLine"></span></p>
+    <nav class="mt-4 flex gap-6" role="tablist" aria-label="มุมมอง">
+      <button type="button" class="tab" role="tab" id="tabRoom" aria-controls="viewRoom" aria-selected="true">กรอกรายห้อง</button>
+      <button type="button" class="tab" role="tab" id="tabSummary" aria-controls="viewSummary" aria-selected="false">สรุปทั้งโรงเรียน</button>
+    </nav>
+  </div>
+</header>
+
+<div id="banner" class="border-b border-line bg-warn-soft text-warn" hidden>
+  <div class="mx-auto max-w-6xl px-4 py-2 text-sm" id="bannerText"></div>
+</div>
+
+<!-- ============ มุมมอง: กรอกรายห้อง ============ -->
+<main id="viewRoom" role="tabpanel" aria-labelledby="tabRoom" class="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-36 pt-6">
+
+  <section class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-room">
+    <div class="flex flex-wrap items-baseline gap-3">
+      <span class="font-display text-lg font-bold text-accent">1</span>
+      <h2 id="h-room" class="text-xl font-semibold">เลือกห้องเรียนของคุณ</h2>
+    </div>
+    <div id="roomGrid" class="rooms mt-4">
+      <div class="flex items-center gap-2 text-muted"><span class="spin"></span>กำลังโหลดรายชื่อนักเรียน…</div>
+    </div>
+  </section>
+
+  <section id="studentSection" class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-students" hidden>
+    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+      <span class="font-display text-lg font-bold text-accent">2</span>
+      <h2 id="h-students" class="text-xl font-semibold">ติ๊กนักเรียนห้อง <span id="roomTitle"></span> ที่ได้รับผลกระทบ</h2>
+      <span class="text-sm text-muted" id="roomMeta"></span>
+    </div>
+    <p class="mt-1 text-sm text-muted">ติ๊กเฉพาะคนที่หนังสือเรียน อุปกรณ์การเรียน หรือเครื่องแบบนักเรียนได้รับความเสียหาย คนที่ไม่ได้ติ๊กจะไม่ถูกนำไปรายงาน</p>
+
+    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3">
+      <div class="w-full sm:w-64">
+        <label for="filterText" class="sr-only">ค้นหาชื่อหรือเลขประจำตัว</label>
+        <input id="filterText" class="field" type="search" placeholder="ค้นหาชื่อ / เลขประจำตัว" autocomplete="off">
+      </div>
+      <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="filterHit" class="h-4 w-4" style="accent-color: var(--accent)"> แสดงเฉพาะคนที่ติ๊กแล้ว</label>
+      <div class="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">
+        <span class="text-muted">ติ๊กทุกคนในห้อง:</span>
+        <button type="button" class="btn btn-ghost btn-sm" data-all="book">หนังสือเรียน</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-all="supplies">อุปกรณ์</button>
+        <button type="button" class="btn btn-ghost btn-sm" data-all="uniform">เครื่องแบบ</button>
+      </div>
+    </div>
+
+    <div class="mt-4 overflow-hidden rounded-lg border border-line">
+      <div class="st-grid st-head" aria-hidden="true">
+        <span class="c">ที่</span><span>เลขประจำตัว 13 หลัก</span><span>ชื่อ - สกุล</span>
+        <span class="c">หนังสือเรียน</span><span class="c">อุปกรณ์การเรียน</span><span class="c">เครื่องแบบ</span><span>หมายเหตุ</span><span></span>
+      </div>
+      <div id="rows"></div>
+      <div id="noMatch" class="px-4 py-8 text-center text-muted" hidden>ไม่พบนักเรียนที่ตรงกับเงื่อนไข</div>
+    </div>
+    <div class="mt-3">
+      <button type="button" class="btn btn-ghost" id="addManual">+ เพิ่มนักเรียนที่ไม่อยู่ในรายชื่อ</button>
+    </div>
+  </section>
+
+  <section id="signSection" class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-sign" hidden>
+    <div class="flex items-baseline gap-3">
+      <span class="font-display text-lg font-bold text-accent">3</span>
+      <h2 id="h-sign" class="text-xl font-semibold">ผู้รายงานข้อมูล (ครูประจำชั้น)</h2>
+    </div>
+    <p class="mt-1 text-sm text-muted">พิมพ์ลงช่อง "ผู้รายงานข้อมูล" ในไฟล์ Excel ของห้องนี้ ส่วนช่องผู้รับรองจะใช้ชื่อผู้อำนวยการจากหน้าสรุปทั้งโรงเรียน</p>
+    <div class="mt-4 grid gap-4 sm:grid-cols-3">
+      <div><label for="teacherName" class="mb-1 block text-sm font-medium">ชื่อ - สกุล</label><input id="teacherName" class="field" autocomplete="name"></div>
+      <div><label for="teacherPhone" class="mb-1 block text-sm font-medium">โทรศัพท์ (มือถือ)</label><input id="teacherPhone" class="field mono" inputmode="tel" autocomplete="tel" placeholder="08x-xxx-xxxx"></div>
+      <div><label for="reportDate" class="mb-1 block text-sm font-medium">วันที่รายงาน</label><input id="reportDate" class="field" type="date"></div>
+    </div>
+  </section>
+</main>
+
+<!-- ============ มุมมอง: สรุปทั้งโรงเรียน ============ -->
+<main id="viewSummary" role="tabpanel" aria-labelledby="tabSummary" class="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-16 pt-6" hidden>
+
+  <section class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-status">
+    <div class="flex flex-wrap items-center gap-3">
+      <h2 id="h-status" class="text-xl font-semibold">สถานะการส่งรายห้อง</h2>
+      <span id="statusCount" class="text-sm text-muted"></span>
+      <button type="button" class="btn btn-ghost btn-sm ml-auto" id="refreshStatus">โหลดใหม่</button>
+    </div>
+    <div class="mt-4 overflow-x-auto rounded-lg border border-line">
+      <table class="num w-full min-w-[44rem] text-sm">
+        <thead>
+          <tr class="bg-paper text-left text-paper-ink">
+            <th class="px-3 py-2 font-semibold">ห้อง</th>
+            <th class="px-3 py-2 font-semibold">สถานะ</th>
+            <th class="px-3 py-2 font-semibold">ครูผู้รายงาน</th>
+            <th class="px-3 py-2 text-right font-semibold">ได้รับผลกระทบ (คน)</th>
+            <th class="px-3 py-2 text-right font-semibold">หนังสือ</th>
+            <th class="px-3 py-2 text-right font-semibold">อุปกรณ์</th>
+            <th class="px-3 py-2 text-right font-semibold">เครื่องแบบ</th>
+            <th class="px-3 py-2 font-semibold">บันทึกล่าสุด</th>
+          </tr>
+        </thead>
+        <tbody id="statusBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-school-sign">
+    <h2 id="h-school-sign" class="text-xl font-semibold">ผู้ลงนามในรายงานภาพรวม</h2>
+    <p class="mt-1 text-sm text-muted">ใช้กับไฟล์ Excel ทั้งโรงเรียน และชื่อผู้อำนวยการจะใช้ในไฟล์รายห้องด้วย</p>
+    <div class="mt-4 grid gap-6 md:grid-cols-2">
+      <fieldset class="grid gap-3">
+        <legend class="mb-2 font-display font-semibold">ผู้รายงานข้อมูล (ครูผู้รับผิดชอบ)</legend>
+        <div><label for="coordinatorName" class="mb-1 block text-sm font-medium">ชื่อ - สกุล</label><input id="coordinatorName" class="field"></div>
+        <div><label for="coordinatorPhone" class="mb-1 block text-sm font-medium">โทรศัพท์ (มือถือ)</label><input id="coordinatorPhone" class="field mono" inputmode="tel" placeholder="08x-xxx-xxxx"></div>
+      </fieldset>
+      <fieldset class="grid gap-3">
+        <legend class="mb-2 font-display font-semibold">ผู้รับรอง (ผู้อำนวยการโรงเรียน)</legend>
+        <div><label for="directorName" class="mb-1 block text-sm font-medium">ชื่อ - สกุล</label><input id="directorName" class="field"></div>
+        <div><label for="directorPhone" class="mb-1 block text-sm font-medium">โทรศัพท์ (มือถือ)</label><input id="directorPhone" class="field mono" inputmode="tel" placeholder="08x-xxx-xxxx"></div>
+      </fieldset>
+      <div class="md:max-w-xs">
+        <label for="schoolDate" class="mb-1 block text-sm font-medium">วันที่รายงาน</label>
+        <input id="schoolDate" class="field" type="date">
+      </div>
+    </div>
+    <div class="mt-6 flex flex-wrap gap-2">
+      <button type="button" class="btn btn-ghost" id="saveSettings">บันทึกข้อมูลผู้ลงนาม</button>
+      <button type="button" class="btn btn-primary" id="downloadSchool">ดาวน์โหลด Excel ทั้งโรงเรียน</button>
+    </div>
+  </section>
+</main>
+
+<!-- แถบล่าง (มุมมองรายห้อง) -->
+<div id="bottomBar" class="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface" style="padding-bottom: env(safe-area-inset-bottom, 0px)" hidden>
+  <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
+    <dl class="num flex flex-wrap gap-x-5 gap-y-1 text-sm">
+      <div class="flex gap-1.5"><dt class="text-muted">ห้อง</dt><dd class="font-semibold" id="barRoom">–</dd></div>
+      <div class="flex gap-1.5"><dt class="text-muted">ได้รับผลกระทบ</dt><dd class="font-semibold" id="sumAll">0</dd></div>
+      <div class="flex gap-1.5"><dt class="text-muted">หนังสือ</dt><dd class="font-semibold" id="sumBook">0</dd></div>
+      <div class="flex gap-1.5"><dt class="text-muted">อุปกรณ์</dt><dd class="font-semibold" id="sumSupplies">0</dd></div>
+      <div class="flex gap-1.5"><dt class="text-muted">เครื่องแบบ</dt><dd class="font-semibold" id="sumUniform">0</dd></div>
+    </dl>
+    <div class="ml-auto flex flex-wrap gap-2">
+      <button type="button" class="btn btn-ghost" id="downloadRoom">ดาวน์โหลด Excel ห้องนี้</button>
+      <button type="button" class="btn btn-primary" id="saveRoom">บันทึกห้องนี้</button>
+    </div>
+  </div>
+</div>
+
+<!-- ยืนยัน -->
+<dialog id="confirmDialog" aria-labelledby="confirmTitle">
+  <form method="dialog" class="flex flex-col gap-3 p-5">
+    <h3 id="confirmTitle" class="text-lg font-semibold"></h3>
+    <p id="confirmText" class="text-muted"></p>
+    <div class="flex justify-end gap-2">
+      <button type="button" class="btn btn-ghost" id="confirmCancel">ยกเลิก</button>
+      <button type="button" class="btn btn-primary" id="confirmOk">ยืนยัน</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="assets/config.js"></script>
+<script src="assets/report.js"></script>
+<script src="assets/app.js"></script>
+</body>
+</html>
