@@ -4,6 +4,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>สำรวจผลกระทบอุทกภัย</title>
+<link rel="icon" type="image/png" href="assets/favicon.png">
+<link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <meta name="description" content="แบบรายงานนักเรียนที่ได้รับผลกระทบ กรณีประสบเหตุอุทกภัย (งบเงินอุดหนุน) สพป.สระบุรี เขต 2">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -28,6 +30,8 @@
     --warn-soft: #fff4d6;
     --ok: #1f7a4a;
     --ok-soft: #e3f4ea;
+    --logo-bg: transparent;
+    --logo-pad: 0;
     --font-display: "Anuphan", "Sarabun", "Leelawadee UI", "Tahoma", sans-serif;
     --font-body: "Sarabun", "Leelawadee UI", "Tahoma", sans-serif;
     --font-mono: "IBM Plex Mono", ui-monospace, "Consolas", monospace;
@@ -39,7 +43,7 @@
       --accent: #5cb8dc; --accent-soft: #15303d; --accent-ink: #06202b;
       --paper: #4a3d12; --paper-ink: #fbe7a3; --hit: #142834;
       --danger: #ff8a7a; --danger-soft: #3a1915; --warn: #f2c25b; --warn-soft: #33290f;
-      --ok: #6fd39c; --ok-soft: #12301f;
+      --ok: #6fd39c; --ok-soft: #12301f; --logo-bg: #eef2f5; --logo-pad: .3rem;
       color-scheme: dark;
     }
   }
@@ -48,7 +52,7 @@
     --accent: #5cb8dc; --accent-soft: #15303d; --accent-ink: #06202b;
     --paper: #4a3d12; --paper-ink: #fbe7a3; --hit: #142834;
     --danger: #ff8a7a; --danger-soft: #3a1915; --warn: #f2c25b; --warn-soft: #33290f;
-    --ok: #6fd39c; --ok-soft: #12301f;
+    --ok: #6fd39c; --ok-soft: #12301f; --logo-bg: #eef2f5; --logo-pad: .3rem;
     color-scheme: dark;
   }
   [hidden] { display: none !important; }
@@ -66,46 +70,80 @@
   .field[aria-invalid="true"] { border-color: var(--danger); background: var(--danger-soft); }
   .mono { font-family: var(--font-mono); letter-spacing: .02em; }
 
+  /* ตราโรงเรียน (โหมดมืดมีพื้นอ่อนรองไว้ ริบบิ้นสีกรมท่าจะได้ไม่กลืนกับพื้น) */
+  .logo { flex: 0 0 auto; width: auto; height: 4.25rem; border-radius: 12px; background: var(--logo-bg); padding: var(--logo-pad); }
+  @media (min-width: 640px) { .logo { height: 6.5rem; } }
+
   /* แท็บ */
   .tab { padding: .6rem .25rem; border-bottom: 3px solid transparent; font-family: var(--font-display); font-weight: 600; color: var(--muted); }
   .tab[aria-selected="true"] { color: var(--accent); border-color: var(--accent); }
   .tab:hover { color: var(--ink); }
 
-  /* ปุ่มเลือกห้อง */
-  .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: .6rem; }
-  .room-btn { display: flex; flex-direction: column; align-items: flex-start; gap: .1rem; padding: .7rem .85rem; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
+  /* ปุ่มเลือกห้อง: มือถือเป็นแถบเลื่อนแนวนอน, จอกว้างเป็นกริด */
+  .rooms { display: flex; gap: .5rem; overflow-x: auto; scroll-snap-type: x proximity; padding-bottom: .35rem; margin-inline: calc(-1 * var(--pad)); padding-inline: var(--pad); scrollbar-width: thin; }
+  .room-btn { flex: 0 0 auto; min-width: 6.25rem; scroll-snap-align: start; display: flex; flex-direction: column; align-items: flex-start; gap: 0; padding: .5rem .75rem; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; }
   .room-btn:hover { border-color: var(--accent); }
   .room-btn[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); background: var(--accent-soft); }
-  .room-btn .rn { font-family: var(--font-display); font-weight: 600; font-size: 1.15rem; line-height: 1.3; }
-  .room-btn .rs { font-size: .8rem; }
+  .room-btn .rn { font-family: var(--font-display); font-weight: 600; font-size: 1.1rem; line-height: 1.35; }
+  .room-btn .rs { font-size: .78rem; line-height: 1.35; white-space: nowrap; }
+  @media (min-width: 640px) {
+    .rooms { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); overflow: visible; margin-inline: 0; padding-inline: 0; }
+    .room-btn { padding: .65rem .85rem; }
+  }
 
-  /* ตารางนักเรียน: กริดบนจอกว้าง, การ์ดบนมือถือ */
-  .st-grid { display: grid; grid-template-columns: 2.5rem minmax(10.5rem,1.1fr) minmax(12rem,2fr) repeat(3, 5.5rem) minmax(7rem,1fr) 2.5rem; gap: .5rem; align-items: center; }
-  .st-head { background: var(--paper); color: var(--paper-ink); font-weight: 600; font-size: .9rem; padding: .55rem .75rem; }
-  .st-head .c { text-align: center; }
-  .st-row { padding: .45rem .75rem; border-bottom: 1px solid var(--line); }
-  .st-row:last-child { border-bottom: 0; }
+  /* การ์ดหลัก */
+  .card { --pad: 1rem; padding: var(--pad); border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+  @media (min-width: 640px) { .card { --pad: 1.5rem; } }
+
+  /* แถบค้นหาที่ตรึงไว้ด้านบน */
+  .tools { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 15; display: flex; flex-direction: column; gap: .5rem;
+    margin-inline: calc(-1 * var(--pad)); padding: .65rem var(--pad); background: var(--surface); border-bottom: 1px solid var(--line); }
+  .tools.stuck { box-shadow: 0 6px 14px -8px rgb(0 0 0 / .25); }
+  .tools-row { display: flex; gap: .5rem; align-items: center; min-width: 0; }
+  .tick-all { display: flex; gap: .4rem; align-items: center; overflow-x: auto; white-space: nowrap; font-size: .85rem; scrollbar-width: none; }
+  .tick-all::-webkit-scrollbar { display: none; }
+  .toggle { flex: 0 0 auto; cursor: pointer; }
+  .toggle span { display: inline-flex; align-items: center; gap: .3rem; height: 2.6rem; padding: 0 .8rem; border: 1px solid var(--line); border-radius: 999px; font-size: .9rem; font-weight: 600; white-space: nowrap; }
+  .toggle input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+  .toggle input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .chip-btn { flex: 0 0 auto; padding: .3rem .75rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink); font-size: .85rem; cursor: pointer; }
+  .chip-btn:hover { border-color: var(--accent); color: var(--accent); }
+  @media (min-width: 860px) {
+    .tools { flex-direction: row; align-items: center; justify-content: space-between; }
+    .tools-row { flex: 1 1 26rem; max-width: 30rem; }
+  }
+
+  /* รายชื่อนักเรียน: มือถือเป็นการ์ด 2 บรรทัด, จอกว้างเป็นแถว */
+  .st-head { display: none; }
+  .st-row { display: grid; gap: .45rem; padding: .7rem var(--pad); border-bottom: 1px solid var(--line); margin-inline: calc(-1 * var(--pad)); }
   .st-row.hit { background: var(--hit); }
-  .st-row .lbl { display: none; }
-  .st-row .txt { min-width: 0; overflow-wrap: anywhere; }
-  .tag { display: inline-block; font-size: .72rem; font-weight: 600; border-radius: 4px; padding: 0 .35rem; vertical-align: middle; }
-  .chk { display: flex; justify-content: center; }
-  .chk input { width: 1.3rem; height: 1.3rem; accent-color: var(--accent); cursor: pointer; }
-  .row-msg { grid-column: 2 / -1; font-size: .85rem; }
-  @media (max-width: 860px) {
-    .st-head { display: none; }
-    .st-grid { grid-template-columns: 1fr 1fr 1fr; }
-    .st-row { position: relative; padding: .85rem .9rem 1rem; }
-    .st-row .no { display: none; }
-    .st-row .nm { grid-column: 1 / -1; order: -2; font-weight: 600; padding-right: 2.5rem; }
-    .st-row .id { grid-column: 1 / -1; order: -1; }
-    .st-row .nt { grid-column: 1 / -1; }
-    .st-row .lbl { display: block; font-size: .8rem; color: var(--muted); font-weight: 400; }
-    .st-row .nm > .lbl { display: none; }
-    .chk { flex-direction: column; align-items: center; justify-content: space-between; align-self: stretch; gap: .15rem; background: var(--bg); border-radius: 6px; padding: .4rem .25rem; }
-    .chk .lbl { text-align: center; line-height: 1.2; }
-    .st-row .del { position: absolute; top: .55rem; right: .6rem; }
+  .nm { display: flex; align-items: baseline; gap: .5rem; min-width: 0; flex-wrap: wrap; }
+  .nm .no { flex: 0 0 1.6rem; color: var(--muted); font-size: .85rem; }
+  .nm .txt { flex: 1 1 0; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+  .nm .field { flex: 1 1 12rem; }
+  .row-acts { margin-left: auto; display: flex; gap: .25rem; align-items: center; }
+  .note-btn { font-size: .82rem; color: var(--accent); background: none; border: 0; padding: .15rem .25rem; cursor: pointer; white-space: nowrap; }
+  .st-row.note-open .note-btn { display: none; }
+  .idbox { display: block; flex-basis: 100%; padding-left: 2.1rem; max-width: 20rem; }
+  .idlbl { display: block; font-size: .78rem; color: var(--warn); }
+  .tag { display: inline-block; font-size: .72rem; font-weight: 600; border-radius: 4px; padding: 0 .35rem; }
+  .pills { display: grid; grid-template-columns: repeat(3, 1fr); gap: .4rem; }
+  .pill { cursor: pointer; }
+  .pill span { display: flex; align-items: center; justify-content: center; gap: .25rem; min-height: 2.6rem; padding: .25rem .3rem; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: .88rem; line-height: 1.2; white-space: nowrap; text-align: center; user-select: none; }
+  .pill input:checked + span { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  .pill input:checked + span::before { content: "✓"; }
+  .pill input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .nt { display: none; padding-left: 2.1rem; }
+  .st-row.note-open .nt { display: block; }
+  .row-msg { font-size: .85rem; padding-left: 2.1rem; }
+  @media (min-width: 860px) {
+    .st-head { display: grid; grid-template-columns: minmax(14rem, 1fr) 22rem minmax(10rem, 15rem); gap: 1rem; padding: .5rem var(--pad); margin-inline: calc(-1 * var(--pad)); background: var(--paper); color: var(--paper-ink); font-weight: 600; font-size: .9rem; }
+    .st-row { grid-template-columns: minmax(14rem, 1fr) 22rem minmax(10rem, 15rem); column-gap: 1rem; align-items: center; padding-block: .45rem; }
+    .pills, .nt { padding-left: 0; }
+    .nt { display: block; }
+    .note-btn { display: none; }
     .row-msg { grid-column: 1 / -1; }
+    .pill span { min-height: 2.25rem; }
   }
 
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: .45rem; border-radius: 6px; padding: .55rem 1rem; font-family: var(--font-display); font-weight: 600; border: 1px solid transparent; cursor: pointer; white-space: nowrap; }
@@ -121,7 +159,7 @@
   dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; background: var(--surface); color: var(--ink); width: min(30rem, calc(100vw - 2rem)); }
   dialog::backdrop { background: rgb(10 20 30 / .45); }
 
-  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(6rem + env(safe-area-inset-bottom, 0px)); z-index: 50; padding: .65rem 1rem; border-radius: 8px; font-weight: 500; box-shadow: 0 10px 24px rgb(0 0 0 / .18); max-width: calc(100vw - 2rem); }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(8.5rem + env(safe-area-inset-bottom, 0px)); z-index: 50; padding: .65rem 1rem; border-radius: 8px; font-weight: 500; box-shadow: 0 10px 24px rgb(0 0 0 / .18); max-width: calc(100vw - 2rem); }
   .spin { display: inline-block; width: 1rem; height: 1rem; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin .7s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2s; } }
@@ -146,11 +184,16 @@
 <body class="min-h-screen">
 
 <header class="border-b border-line bg-surface">
-  <div class="mx-auto max-w-6xl px-4 pt-5 sm:pt-7">
-    <p class="text-sm font-medium tracking-wide text-accent">สพป.สระบุรี เขต 2 · งบเงินอุดหนุน</p>
-    <h1 class="mt-1 text-2xl font-bold leading-tight sm:text-3xl">แบบรายงานนักเรียนที่ได้รับผลกระทบจากอุทกภัย</h1>
-    <p class="mt-1 text-muted"><span id="schoolLine"></span></p>
-    <nav class="mt-4 flex gap-6" role="tablist" aria-label="มุมมอง">
+  <div class="mx-auto max-w-6xl px-4 pt-4 sm:pt-7">
+    <div class="flex items-center gap-3 sm:gap-5">
+      <img src="assets/logo.webp" alt="ตราโรงเรียนชุมชนวัดไทยงาม" width="191" height="240" class="logo">
+      <div class="min-w-0">
+        <p class="text-xs font-medium tracking-wide text-accent sm:text-sm">สพป.สระบุรี เขต 2 · งบเงินอุดหนุน</p>
+        <h1 class="mt-0.5 text-lg font-bold leading-snug sm:text-3xl">แบบรายงานนักเรียนที่ได้รับผลกระทบจากอุทกภัย</h1>
+        <p class="text-sm text-muted sm:text-base"><span id="schoolLine"></span></p>
+      </div>
+    </div>
+    <nav class="mt-2 flex gap-6 sm:mt-4" role="tablist" aria-label="มุมมอง">
       <button type="button" class="tab" role="tab" id="tabRoom" aria-controls="viewRoom" aria-selected="true">กรอกรายห้อง</button>
       <button type="button" class="tab" role="tab" id="tabSummary" aria-controls="viewSummary" aria-selected="false">สรุปทั้งโรงเรียน</button>
     </nav>
@@ -162,71 +205,72 @@
 </div>
 
 <!-- ============ มุมมอง: กรอกรายห้อง ============ -->
-<main id="viewRoom" role="tabpanel" aria-labelledby="tabRoom" class="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-36 pt-6">
+<main id="viewRoom" role="tabpanel" aria-labelledby="tabRoom" class="mx-auto flex max-w-6xl flex-col gap-4 px-3 pb-44 pt-4 sm:gap-6 sm:px-4 sm:pt-6">
 
-  <section class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-room">
-    <div class="flex flex-wrap items-baseline gap-3">
-      <span class="font-display text-lg font-bold text-accent">1</span>
-      <h2 id="h-room" class="text-xl font-semibold">เลือกห้องเรียนของคุณ</h2>
+  <section class="card" aria-labelledby="h-room">
+    <div class="flex items-baseline gap-2">
+      <span class="font-display font-bold text-accent">1</span>
+      <h2 id="h-room" class="text-lg font-semibold sm:text-xl">เลือกห้องเรียนของคุณ</h2>
     </div>
-    <div id="roomGrid" class="rooms mt-4">
+    <div id="roomGrid" class="rooms mt-3">
       <div class="flex items-center gap-2 text-muted"><span class="spin"></span>กำลังโหลดรายชื่อนักเรียน…</div>
     </div>
   </section>
 
-  <section id="studentSection" class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-students" hidden>
-    <div class="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-      <span class="font-display text-lg font-bold text-accent">2</span>
-      <h2 id="h-students" class="text-xl font-semibold">ติ๊กนักเรียนห้อง <span id="roomTitle"></span> ที่ได้รับผลกระทบ</h2>
-      <span class="text-sm text-muted" id="roomMeta"></span>
+  <section id="signSection" class="card" aria-labelledby="h-sign" hidden>
+    <div class="flex items-baseline gap-2">
+      <span class="font-display font-bold text-accent">2</span>
+      <h2 id="h-sign" class="text-lg font-semibold sm:text-xl">ครูผู้รายงาน ห้อง <span id="roomTitle2"></span></h2>
     </div>
-    <p class="mt-1 text-sm text-muted">ติ๊กเฉพาะคนที่หนังสือเรียน อุปกรณ์การเรียน หรือเครื่องแบบนักเรียนได้รับความเสียหาย คนที่ไม่ได้ติ๊กจะไม่ถูกนำไปรายงาน</p>
-
-    <div class="mt-4 flex flex-wrap items-center gap-x-4 gap-y-3">
-      <div class="w-full sm:w-64">
-        <label for="filterText" class="sr-only">ค้นหาชื่อหรือเลขประจำตัว</label>
-        <input id="filterText" class="field" type="search" placeholder="ค้นหาชื่อ / เลขประจำตัว" autocomplete="off">
+    <div class="mt-3 grid gap-3 sm:grid-cols-3">
+      <div><label for="teacherName" class="mb-1 block text-sm font-medium">ชื่อ - สกุล</label><input id="teacherName" class="field" autocomplete="name"></div>
+      <div class="grid grid-cols-2 gap-3 sm:col-span-2">
+        <div><label for="teacherPhone" class="mb-1 block text-sm font-medium">โทรศัพท์</label><input id="teacherPhone" class="field mono" inputmode="tel" autocomplete="tel" placeholder="08x-xxx-xxxx"></div>
+        <div><label for="reportDate" class="mb-1 block text-sm font-medium">วันที่รายงาน</label><input id="reportDate" class="field" type="date"></div>
       </div>
-      <label class="flex items-center gap-2 text-sm"><input type="checkbox" id="filterHit" class="h-4 w-4" style="accent-color: var(--accent)"> แสดงเฉพาะคนที่ติ๊กแล้ว</label>
-      <div class="flex flex-wrap items-center gap-2 text-sm sm:ml-auto">
-        <span class="text-muted">ติ๊กทุกคนในห้อง:</span>
-        <button type="button" class="btn btn-ghost btn-sm" data-all="book">หนังสือเรียน</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-all="supplies">อุปกรณ์</button>
-        <button type="button" class="btn btn-ghost btn-sm" data-all="uniform">เครื่องแบบ</button>
-      </div>
-    </div>
-
-    <div class="mt-4 overflow-hidden rounded-lg border border-line">
-      <div class="st-grid st-head" aria-hidden="true">
-        <span class="c">ที่</span><span>เลขประจำตัว 13 หลัก</span><span>ชื่อ - สกุล</span>
-        <span class="c">หนังสือเรียน</span><span class="c">อุปกรณ์การเรียน</span><span class="c">เครื่องแบบ</span><span>หมายเหตุ</span><span></span>
-      </div>
-      <div id="rows"></div>
-      <div id="noMatch" class="px-4 py-8 text-center text-muted" hidden>ไม่พบนักเรียนที่ตรงกับเงื่อนไข</div>
-    </div>
-    <div class="mt-3">
-      <button type="button" class="btn btn-ghost" id="addManual">+ เพิ่มนักเรียนที่ไม่อยู่ในรายชื่อ</button>
     </div>
   </section>
 
-  <section id="signSection" class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-sign" hidden>
-    <div class="flex items-baseline gap-3">
-      <span class="font-display text-lg font-bold text-accent">3</span>
-      <h2 id="h-sign" class="text-xl font-semibold">ผู้รายงานข้อมูล (ครูประจำชั้น)</h2>
+  <section id="studentSection" class="card" aria-labelledby="h-students" hidden>
+    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0">
+      <span class="font-display font-bold text-accent">3</span>
+      <h2 id="h-students" class="text-lg font-semibold sm:text-xl">ติ๊กนักเรียนห้อง <span id="roomTitle"></span></h2>
+      <span class="text-sm text-muted" id="roomMeta"></span>
     </div>
-    <p class="mt-1 text-sm text-muted">พิมพ์ลงช่อง "ผู้รายงานข้อมูล" ในไฟล์ Excel ของห้องนี้ ส่วนช่องผู้รับรองจะใช้ชื่อผู้อำนวยการจากหน้าสรุปทั้งโรงเรียน</p>
-    <div class="mt-4 grid gap-4 sm:grid-cols-3">
-      <div><label for="teacherName" class="mb-1 block text-sm font-medium">ชื่อ - สกุล</label><input id="teacherName" class="field" autocomplete="name"></div>
-      <div><label for="teacherPhone" class="mb-1 block text-sm font-medium">โทรศัพท์ (มือถือ)</label><input id="teacherPhone" class="field mono" inputmode="tel" autocomplete="tel" placeholder="08x-xxx-xxxx"></div>
-      <div><label for="reportDate" class="mb-1 block text-sm font-medium">วันที่รายงาน</label><input id="reportDate" class="field" type="date"></div>
+    <p class="mt-1 text-sm text-muted">กดปุ่มรายการที่นักเรียนได้รับความเสียหาย คนที่ไม่ได้กดจะไม่ถูกนำไปรายงาน</p>
+
+    <div class="tools mt-3" id="tools">
+      <div class="tools-row">
+        <label for="filterText" class="sr-only">ค้นหาชื่อนักเรียน</label>
+        <input id="filterText" class="field" type="search" placeholder="ค้นหาชื่อนักเรียน" autocomplete="off" enterkeyhint="search">
+        <label class="toggle" title="แสดงเฉพาะคนที่ติ๊กแล้ว">
+          <input type="checkbox" id="filterHit" class="sr-only">
+          <span>ติ๊กแล้ว <b class="num" id="hitCount">0</b></span>
+        </label>
+      </div>
+      <div class="tick-all" role="group" aria-label="ติ๊กทุกคนในห้อง">
+        <span class="text-muted">ทั้งห้อง:</span>
+        <button type="button" class="chip-btn" data-all="book">หนังสือเรียน</button>
+        <button type="button" class="chip-btn" data-all="supplies">อุปกรณ์</button>
+        <button type="button" class="chip-btn" data-all="uniform">เครื่องแบบ</button>
+      </div>
+    </div>
+
+    <div class="st-head" aria-hidden="true">
+      <span>ชื่อ - สกุล</span><span>ผลกระทบ (กดเพื่อเลือก)</span><span>หมายเหตุ</span>
+    </div>
+    <div id="rows"></div>
+    <div id="noMatch" class="px-2 py-8 text-center text-muted" hidden>ไม่พบนักเรียนที่ตรงกับเงื่อนไข</div>
+    <div class="mt-4">
+      <button type="button" class="btn btn-ghost w-full sm:w-auto" id="addManual">+ เพิ่มนักเรียนที่ไม่อยู่ในรายชื่อ</button>
     </div>
   </section>
 </main>
 
 <!-- ============ มุมมอง: สรุปทั้งโรงเรียน ============ -->
-<main id="viewSummary" role="tabpanel" aria-labelledby="tabSummary" class="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-16 pt-6" hidden>
+<main id="viewSummary" role="tabpanel" aria-labelledby="tabSummary" class="mx-auto flex max-w-6xl flex-col gap-4 px-3 pb-16 pt-4 sm:gap-6 sm:px-4 sm:pt-6" hidden>
 
-  <section class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-status">
+  <section class="card" aria-labelledby="h-status">
     <div class="flex flex-wrap items-center gap-3">
       <h2 id="h-status" class="text-xl font-semibold">สถานะการส่งรายห้อง</h2>
       <span id="statusCount" class="text-sm text-muted"></span>
@@ -251,7 +295,7 @@
     </div>
   </section>
 
-  <section class="rounded-xl border border-line bg-surface p-4 sm:p-6" aria-labelledby="h-school-sign">
+  <section class="card" aria-labelledby="h-school-sign">
     <h2 id="h-school-sign" class="text-xl font-semibold">ผู้ลงนามในรายงานภาพรวม</h2>
     <p class="mt-1 text-sm text-muted">ใช้กับไฟล์ Excel ทั้งโรงเรียน และชื่อผู้อำนวยการจะใช้ในไฟล์รายห้องด้วย</p>
     <div class="mt-4 grid gap-6 md:grid-cols-2">
@@ -279,16 +323,13 @@
 
 <!-- แถบล่าง (มุมมองรายห้อง) -->
 <div id="bottomBar" class="fixed inset-x-0 bottom-0 z-20 border-t border-line bg-surface" style="padding-bottom: env(safe-area-inset-bottom, 0px)" hidden>
-  <div class="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3">
-    <dl class="num flex flex-wrap gap-x-5 gap-y-1 text-sm">
-      <div class="flex gap-1.5"><dt class="text-muted">ห้อง</dt><dd class="font-semibold" id="barRoom">–</dd></div>
-      <div class="flex gap-1.5"><dt class="text-muted">ได้รับผลกระทบ</dt><dd class="font-semibold" id="sumAll">0</dd></div>
-      <div class="flex gap-1.5"><dt class="text-muted">หนังสือ</dt><dd class="font-semibold" id="sumBook">0</dd></div>
-      <div class="flex gap-1.5"><dt class="text-muted">อุปกรณ์</dt><dd class="font-semibold" id="sumSupplies">0</dd></div>
-      <div class="flex gap-1.5"><dt class="text-muted">เครื่องแบบ</dt><dd class="font-semibold" id="sumUniform">0</dd></div>
-    </dl>
-    <div class="ml-auto flex flex-wrap gap-2">
-      <button type="button" class="btn btn-ghost" id="downloadRoom">ดาวน์โหลด Excel ห้องนี้</button>
+  <div class="mx-auto flex max-w-6xl flex-col gap-2 px-3 py-2.5 sm:flex-row sm:items-center sm:gap-6 sm:px-4 sm:py-3">
+    <p class="num text-sm leading-snug">
+      <b id="barRoom">–</b> · ได้รับผลกระทบ <b id="sumAll">0</b> คน
+      <span class="text-muted">(หนังสือ <span id="sumBook">0</span> · อุปกรณ์ <span id="sumSupplies">0</span> · เครื่องแบบ <span id="sumUniform">0</span>)</span>
+    </p>
+    <div class="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
+      <button type="button" class="btn btn-ghost" id="downloadRoom">ดาวน์โหลด Excel</button>
       <button type="button" class="btn btn-primary" id="saveRoom">บันทึกห้องนี้</button>
     </div>
   </div>

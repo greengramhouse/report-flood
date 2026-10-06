@@ -7,9 +7,9 @@
   var SCHOOL = { code: (CFG.SCHOOL_CODE || '').trim(), name: (CFG.SCHOOL_NAME || '').trim() };
   var GRADES = window.FloodReport.GRADES;
   var IMPACTS = [
-    { key: 'book', label: 'หนังสือเรียน' },
-    { key: 'supplies', label: 'อุปกรณ์การเรียน' },
-    { key: 'uniform', label: 'เครื่องแบบ' }
+    { key: 'book', label: 'หนังสือเรียน', short: 'หนังสือ' },
+    { key: 'supplies', label: 'อุปกรณ์การเรียน', short: 'อุปกรณ์' },
+    { key: 'uniform', label: 'เครื่องแบบนักเรียน', short: 'เครื่องแบบ' }
   ];
   var THAI_MONTHS = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน',
     'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
@@ -268,6 +268,7 @@
       el.signSection.hidden = false;
       el.bottomBar.hidden = false;
       $('roomTitle').textContent = room;
+      $('roomTitle2').textContent = room;
       $('barRoom').textContent = room;
       $('roomMeta').textContent = (state.rosterCount[room] || 0) + ' คนในรายชื่อ';
       el.filterText.value = '';
@@ -293,7 +294,9 @@
       } else {
         renderRows();
       }
-      el.studentSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      var chip = el.roomGrid.querySelector('[aria-pressed="true"]');
+      if (chip) chip.scrollIntoView({ block: 'nearest', inline: 'center' });
+      el.signSection.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
     if (state.dirty) {
       confirmBox('เปลี่ยนห้อง?', 'การติ๊กในห้อง ' + state.room + ' ที่ยังไม่บันทึกจะหายไป', 'เปลี่ยนห้อง').then(function (ok) { if (ok) go(); });
@@ -338,25 +341,28 @@
 
   function rowHtml(r, i) {
     var label = r.name || ('รายการที่ ' + (i + 1));
+    // ไม่แสดงเลขประจำตัว ยกเว้นคนที่ต้องกรอก/แก้ (เพิ่มเอง หรือเลขในระบบไม่ครบ 13 หลัก)
     var idCell = r.idEditable
-      ? '<input class="field mono num" data-f="citizenId" inputmode="numeric" maxlength="17" value="' + esc(r.citizenId) + '" placeholder="13 หลัก" aria-label="เลขประจำตัวของ ' + esc(label) + '">'
-      : '<span class="mono num txt">' + esc(r.citizenId) + '</span>';
+      ? '<label class="idbox"><span class="idlbl">เลขประจำตัว 13 หลัก' + (r.manual ? '' : ' (ในระบบไม่ครบ กรุณาแก้)') + '</span>' +
+        '<input class="field mono num" data-f="citizenId" inputmode="numeric" maxlength="17" value="' + esc(r.citizenId) + '" placeholder="13 หลัก" aria-label="เลขประจำตัวของ ' + esc(label) + '"></label>'
+      : '';
     var nameCell = r.manual
       ? '<input class="field" data-f="name" value="' + esc(r.name) + '" placeholder="คำนำหน้า ชื่อ สกุล" aria-label="ชื่อ - สกุล รายการที่ ' + (i + 1) + '">'
       : '<span class="txt">' + esc(r.name) + '</span>';
-    var checks = IMPACTS.map(function (imp) {
-      var id = 'r' + i + '_' + imp.key;
-      return '<label class="chk" for="' + id + '"><span class="lbl">' + imp.label + '</span>' +
-        '<input type="checkbox" id="' + id + '" data-f="' + imp.key + '"' + (r[imp.key] ? ' checked' : '') + ' aria-label="' + imp.label + ' ของ ' + esc(label) + '"></label>';
+    // ปุ่มกดแบบ pill (checkbox จริงซ่อนไว้ข้างใน) กดง่ายบนมือถือ
+    var pills = IMPACTS.map(function (imp) {
+      return '<label class="pill"><input type="checkbox" class="sr-only" data-f="' + imp.key + '"' + (r[imp.key] ? ' checked' : '') +
+        ' aria-label="' + imp.label + ' ของ ' + esc(label) + '"><span>' + imp.short + '</span></label>';
     }).join('');
-    var tag = r.manual ? ' <span class="tag bg-accent-soft text-accent">เพิ่มเอง</span>' : '';
-    return '<div class="st-grid st-row' + (isHit(r) ? ' hit' : '') + '" data-i="' + i + '">' +
-      '<span class="no num text-center text-muted">' + (r.no || '+') + '</span>' +
-      '<label class="id"><span class="lbl">เลขประจำตัว 13 หลัก</span>' + idCell + '</label>' +
-      '<div class="nm"><span class="lbl">ชื่อ - สกุล</span>' + nameCell + tag + '</div>' +
-      checks +
-      '<label class="nt"><span class="lbl">หมายเหตุ</span><input class="field" data-f="note" value="' + esc(r.note) + '" aria-label="หมายเหตุของ ' + esc(label) + '"></label>' +
-      (r.manual ? '<button type="button" class="icon-btn del" data-del="' + i + '" aria-label="ลบ ' + esc(label) + '" title="ลบแถวนี้">' + TRASH + '</button>' : '<span></span>') +
+    var tag = r.manual ? '<span class="tag bg-accent-soft text-accent">เพิ่มเอง</span>' : '';
+    var acts = '<span class="row-acts">' +
+      '<button type="button" class="note-btn" data-note="' + i + '">+ หมายเหตุ</button>' +
+      (r.manual ? '<button type="button" class="icon-btn del" data-del="' + i + '" aria-label="ลบ ' + esc(label) + '" title="ลบแถวนี้">' + TRASH + '</button>' : '') +
+      '</span>';
+    return '<div class="st-row' + (isHit(r) ? ' hit' : '') + (r.note ? ' note-open' : '') + '" data-i="' + i + '">' +
+      '<div class="nm"><span class="no num">' + (r.no || '+') + '</span>' + nameCell + tag + acts + idCell + '</div>' +
+      '<div class="pills" role="group" aria-label="ผลกระทบของ ' + esc(label) + '">' + pills + '</div>' +
+      '<div class="nt"><input class="field" data-f="note" value="' + esc(r.note) + '" placeholder="หมายเหตุ" aria-label="หมายเหตุของ ' + esc(label) + '"></div>' +
       '<div class="row-msg" hidden></div>' +
       '</div>';
   }
@@ -365,12 +371,6 @@
     el.rows.innerHTML = state.rows.map(rowHtml).join('');
     applyFilter();
     updateSummary();
-    // เตือนเลขประจำตัวที่ผิดรูปแบบตั้งแต่แรก
-    state.rows.forEach(function (r, i) {
-      if (!r.manual && r.idEditable && !idFormatOk(cleanId(r.citizenId))) {
-        showRowProblems(i, { errors: [], warns: ['เลขประจำตัวจากระบบไม่ครบ 13 หลัก ถ้าทราบเลขที่ถูกต้องให้แก้ในช่องนี้'], fields: {} });
-      }
-    });
   }
 
   function applyFilter() {
@@ -380,7 +380,7 @@
     Array.prototype.forEach.call(el.rows.children, function (row) {
       var r = state.rows[+row.dataset.i];
       var ok = (!onlyHit || isHit(r) || (r.manual && !r.name && !r.citizenId)) &&
-        (!q || r.name.toLowerCase().indexOf(q) >= 0 || r.citizenId.indexOf(q) >= 0 || String(r.no) === q);
+        (!q || r.name.toLowerCase().indexOf(q) >= 0 || String(r.no) === q);
       row.hidden = !ok;
       if (ok) shown++;
     });
@@ -398,6 +398,7 @@
   function updateSummary() {
     var hits = hitRows();
     $('sumAll').textContent = hits.length;
+    $('hitCount').textContent = hits.length;
     IMPACTS.forEach(function (imp) {
       $('sum' + imp.key.charAt(0).toUpperCase() + imp.key.slice(1)).textContent = hits.filter(function (r) { return r[imp.key]; }).length;
     });
@@ -477,6 +478,13 @@
     if (r.citizenId) showRowProblems(i, rowProblems(r, dupCounts()));
   });
   el.rows.addEventListener('click', function (e) {
+    var noteBtn = e.target.closest('[data-note]');
+    if (noteBtn) {
+      var row = noteBtn.closest('.st-row');
+      row.classList.add('note-open');
+      row.querySelector('[data-f="note"]').focus();
+      return;
+    }
     var btn = e.target.closest('[data-del]');
     if (!btn) return;
     var i = +btn.dataset.del;
@@ -726,6 +734,12 @@
   }
   $('tabRoom').addEventListener('click', function () { showView('room'); });
   $('tabSummary').addEventListener('click', function () { showView('summary'); });
+
+  // เงาใต้แถบค้นหาเมื่อถูกตรึงอยู่ด้านบน
+  var tools = $('tools');
+  window.addEventListener('scroll', function () {
+    if (!el.studentSection.hidden) tools.classList.toggle('stuck', tools.getBoundingClientRect().top <= 1);
+  }, { passive: true });
 
   window.addEventListener('beforeunload', function (e) {
     if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
