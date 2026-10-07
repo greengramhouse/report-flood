@@ -346,6 +346,8 @@
       renderRoomGrid();
       el.studentSection.hidden = false;
       el.signSection.hidden = false;
+      $('photoSection').hidden = false;
+      loadPhotos(room);
       el.bottomBar.hidden = false;
       $('roomTitle').textContent = room;
       $('roomTitle2').textContent = room;
@@ -719,12 +721,303 @@
       }).catch(function (err) { toast('สร้างไฟล์ไม่สำเร็จ: ' + err.message, 'error'); });
   });
 
+  // ---------------- รูปภาพสภาพน้ำท่วม (ไม่บังคับ) ----------------
+  // เลือกรูปแล้วอัปโหลดขึ้น Google Drive ทันที (ย่อรูปในเครื่องก่อน) ไม่ผูกกับปุ่มบันทึกห้อง
+  var MAX_PHOTOS = 10;
+  var PHOTO_PARALLEL = 3;  // อัปพร้อมกันกี่รูป
+  var deleting = {};    // id ของรูปที่กำลังลบ
+  var uploads = [];      // รูปที่กำลังอัปโหลด [{ room }]
+  var photoData = {};    // id -> { b64, w, h, ext } ของรูปที่อัปโหลดรอบนี้ ทำ Word ได้โดยไม่ต้องโหลดซ้ำ
+  state.photos = [];
+  state.photosLoaded = false;
+
+  // ดึงรายการรูปของห้องจากเซิร์ฟเวอร์ ถ้ายังอยู่ห้องเดิมก็แสดงผลเลย
+  function fetchPhotos(room) {
+    // รูปไม่บังคับ ไม่ต้องรอนาน ถ้าช้าให้ครูกดลองใหม่เอง
+    return apiGet({ action: 'photos', room: room }, { tries: 2, timeout: 15000 }).then(function (res) {
+      var list = res.photos || [];
+      if (state.room === room) {
+        state.photos = list;
+        state.photosLoaded = true;
+        renderPhotos();
+      }
+      return list;
+    });
+  }
+
+  function loadPhotos(room) {
+    state.photos = [];
+    state.photosLoaded = false;
+    renderPhotos();
+    if (!API_URL) return;
+    fetchPhotos(room).catch(function (err) {
+      if (state.room !== room) return;
+      $('photoGrid').innerHTML = '';
+      $('photoMsg').hidden = false;
+      $('photoMsg').innerHTML = 'โหลดรูปไม่สำเร็จ: ' + esc(err.message) +
+        ' <button type="button" class="btn btn-ghost btn-sm" id="retryPhotos">ลองอีกครั้ง</button>';
+      $('retryPhotos').addEventListener('click', function () { loadPhotos(room); });
+    });
+  }
+
+  function renderPhotos() {
+    var grid = $('photoGrid'), msg = $('photoMsg');
+    if (!API_URL) {
+      grid.innerHTML = '';
+      msg.hidden = false;
+      msg.textContent = 'ต้องตั้งค่า API_URL ก่อนจึงจะอัปโหลดรูปได้';
+      return;
+    }
+    if (!state.photosLoaded) {
+      grid.innerHTML = '';
+      msg.hidden = false;
+      msg.innerHTML = loadingHtml('กำลังโหลดรูป…');
+      return;
+    }
+    var mine = uploads.filter(function (u) { return u.room === state.room; });
+    var pending = mine.length;
+    var html = state.photos.map(function (p, i) {
+      var img = p.thumb ? '<img src="' + esc(p.thumb) + '" alt="รูปที่ ' + (i + 1) + '" loading="lazy">'
+        : '<span class="photo-ph">รูปที่ ' + (i + 1) + '</span>';
+      // กำลังลบ: ไม่มีปุ่ม × และลิงก์ กันกดซ้ำ
+      if (deleting[p.id]) {
+        return '<div class="photo deleting">' + img + '<div class="del-state"><span class="spin"></span>กำลังลบ…</div></div>';
+      }
+      return '<div class="photo"><a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="เปิดรูปใน Google Drive">' + img +
+        '</a><button type="button" class="del" data-del="' + esc(p.id) + '" aria-label="ลบรูปที่ ' + (i + 1) + '">×</button></div>';
+    }).join('');
+    html += mine.map(function (u) {
+      return '<div class="photo pending" data-up="' + u.key + '"><img src="' + u.preview + '" alt="">' +
+        '<div class="up"><span class="up-txt">' + esc(u.stage) + '</span><div class="bar"><span style="width:' + u.pct + '%"></span></div></div></div>';
+    }).join('');
+    if (state.photos.length + pending < MAX_PHOTOS) {
+      html += '<button type="button" class="photo-add" id="photoAdd"><b>+</b><span>เพิ่มรูป</span></button>';
+    }
+    grid.innerHTML = html;
+    msg.hidden = !state.photos.length;
+    msg.textContent = 'อัปโหลดแล้ว ' + state.photos.length + ' รูป' + (state.photos.length >= MAX_PHOTOS ? ' (ครบจำนวนแล้ว)' : '');
+  }
+
+  function loadImage(src) {
+    return new Promise(function (resolve, reject) {
+      var img = new Image();
+      img.onload = function () { resolve(img); };
+      img.onerror = function () { reject(new Error('เปิดไฟล์รูปไม่ได้')); };
+      img.src = src;
+    });
+  }
+
+  // ย่อรูปให้ด้านยาวไม่เกิน max px แล้วแปลงเป็น JPEG
+  function toJpeg(img, max, quality) {
+    var k = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight));
+    var c = document.createElement('canvas');
+    c.width = Math.max(1, Math.round(img.naturalWidth * k));
+    c.height = Math.max(1, Math.round(img.naturalHeight * k));
+    var ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.drawImage(img, 0, 0, c.width, c.height);
+    return { url: c.toDataURL('image/jpeg', quality), w: c.width, h: c.height };
+  }
+
+  // ---- แถบความคืบหน้า ----
+  // Apps Script ไม่รองรับ CORS preflight จึงวัดความคืบหน้าการส่งจริงไม่ได้ (XHR upload.onprogress ทำให้เกิด preflight)
+  // ช่วงรอเซิร์ฟเวอร์จึงให้แถบค่อย ๆ ขยับเข้าใกล้ 90% แล้วเต็มเมื่อเซิร์ฟเวอร์ตอบ
+  var upSeq = 0;
+  var upBatch = { total: 0, done: 0 };   // รวมทุกรอบที่ยังอัปไม่เสร็จ
+
+  function setJob(job, pct, stage) {
+    job.pct = pct;
+    if (stage) job.stage = stage;
+    var tile = $('photoGrid').querySelector('[data-up="' + job.key + '"]');
+    if (tile) {
+      tile.querySelector('.bar span').style.width = pct + '%';
+      tile.querySelector('.up-txt').textContent = job.stage;
+    }
+    renderProgress();
+  }
+
+  function renderProgress() {
+    var box = $('photoProgress');
+    if (!upBatch.total) { box.hidden = true; return; }
+    var running = uploads.reduce(function (s, u) { return s + u.pct; }, 0);
+    var pct = Math.min(100, Math.round((upBatch.done * 100 + running) / upBatch.total));
+    box.hidden = false;
+    $('photoProgressText').textContent = upBatch.done >= upBatch.total
+      ? 'อัปโหลดครบ ' + upBatch.total + ' รูป'
+      : 'กำลังอัปโหลด เสร็จแล้ว ' + upBatch.done + ' จาก ' + upBatch.total + ' รูป';
+    $('photoProgressPct').textContent = pct + '%';
+    $('photoProgressBar').style.width = pct + '%';
+  }
+
+  function uploadPhoto(job, room) {
+    var file = job.file;
+    var creep = null;
+    var stop = function () { if (creep) clearInterval(creep); creep = null; };
+    setJob(job, 5, 'กำลังย่อรูป…');
+    return loadImage(job.preview).then(function (img) {
+      var full = toJpeg(img, 1600, 0.82);
+      var thumb = toJpeg(img, 160, 0.6);
+      var b64 = full.url.slice(full.url.indexOf(',') + 1);
+      setJob(job, 15, 'กำลังส่ง…');
+      creep = setInterval(function () {
+        setJob(job, Math.round((job.pct + (90 - job.pct) * 0.06) * 10) / 10, job.pct > 55 ? 'กำลังบันทึก…' : null);
+      }, 300);
+      return apiPost({ action: 'uploadPhoto', data: { room: room, mimeType: 'image/jpeg', data: b64, thumb: thumb.url } })
+        .then(function (res) {
+          stop();
+          setJob(job, 100, 'เสร็จแล้ว');
+          photoData[res.photo.id] = { b64: b64, w: full.w, h: full.h, ext: 'jpg' };
+          if (state.room === room) state.photos.push(res.photo);
+        });
+    }, function (err) {
+      throw new Error('ไฟล์ ' + file.name + ': ' + err.message);
+    }).catch(function (err) {
+      stop();
+      throw err;
+    });
+  }
+
+  $('photoGrid').addEventListener('click', function (e) {
+    if (e.target.closest('#photoAdd')) { $('photoInput').click(); return; }
+    var del = e.target.closest('[data-del]');
+    if (!del) return;
+    var id = del.dataset.del, room = state.room;
+    if (deleting[id]) return;
+    confirmBox('ลบรูปนี้?', 'รูปจะถูกลบออกจาก Google Drive ด้วย', 'ลบรูป').then(function (ok) {
+      if (!ok || deleting[id]) return;
+      deleting[id] = true;
+      renderPhotos();
+      var gone = function () {
+        delete photoData[id];
+        if (state.room === room) state.photos = state.photos.filter(function (p) { return p.id !== id; });
+        toast('ลบรูปแล้ว', 'ok');
+      };
+      apiPost({ action: 'deletePhoto', data: { room: room, id: id } }).then(gone, function (err) {
+        // Apps Script อาจตอบ error (เช่น 404) ทั้งที่ลบไปแล้ว ดูรายการจริงก่อนแจ้งว่าไม่สำเร็จ
+        return fetchPhotos(room).then(function (list) {
+          if (!list.some(function (p) { return p.id === id; })) return gone();
+          throw err;
+        }, function () { throw err; });
+      }).catch(function (err) {
+        toast('ลบรูปไม่สำเร็จ: ' + err.message, 'error');
+      }).then(function () {
+        delete deleting[id];
+        if (state.room === room) renderPhotos();
+      });
+    });
+  });
+
+  $('photoInput').addEventListener('change', function () {
+    var room = state.room;
+    var files = Array.prototype.slice.call(this.files || []);
+    this.value = '';
+    if (!room || !files.length) return;
+    var roomPending = uploads.filter(function (u) { return u.room === room; }).length;
+    var space = MAX_PHOTOS - state.photos.length - roomPending;
+    if (files.length > space) toast('ห้องละไม่เกิน ' + MAX_PHOTOS + ' รูป จะอัปโหลดเฉพาะ ' + space + ' รูปแรก', 'info');
+    files = files.slice(0, Math.max(0, space));
+    if (!files.length) return;
+    var jobs = files.map(function (file) {
+      var u = { room: room, key: 'u' + (++upSeq), file: file, preview: URL.createObjectURL(file), pct: 0, stage: 'รอคิว' };
+      uploads.push(u);
+      return u;
+    });
+    upBatch.total += jobs.length;
+    renderPhotos();
+    renderProgress();
+    var done = 0, failed = [];
+    var known = state.photos.map(function (p) { return p.id; });   // รูปที่มีอยู่ก่อนอัปรอบนี้
+    // อัปพร้อมกันครั้งละ PHOTO_PARALLEL รูป: เวลาส่วนใหญ่ (~4 วิ/รูป) เป็นการรอ Apps Script + Drive ไม่ใช่การส่งข้อมูล
+    // อัปพร้อมกันจึงเร็วขึ้นมาก แต่ไม่มากเกินไปจนเน็ตมือถือรับไม่ไหว
+    var queue = jobs.slice();
+    var worker = function () {
+      var job = queue.shift();
+      if (!job) return Promise.resolve();
+      return uploadPhoto(job, room).then(function () { done++; }, function (err) { failed.push(err.message); })
+        .then(function () {
+          URL.revokeObjectURL(job.preview);
+          uploads.splice(uploads.indexOf(job), 1);
+          upBatch.done++;
+          if (state.room === room) renderPhotos();
+          renderProgress();
+          // อัปครบทุกรอบแล้ว ซ่อนแถบรวมหลังให้เห็น 100% แป๊บหนึ่ง
+          if (!uploads.length) {
+            setTimeout(function () {
+              if (uploads.length) return;
+              upBatch = { total: 0, done: 0 };
+              renderProgress();
+            }, 1500);
+          }
+          return worker();
+        });
+    };
+    var workers = [];
+    for (var w = 0; w < Math.min(PHOTO_PARALLEL, jobs.length); w++) workers.push(worker());
+    Promise.all(workers).then(function () {
+      if (!failed.length) {
+        if (done) toast('อัปโหลดรูปห้อง ' + room + ' แล้ว ' + done + ' รูป', 'ok');
+        return;
+      }
+      // Apps Script บางครั้งตอบ POST เป็น error (เช่น 404) ทั้งที่บันทึกรูปไปแล้ว
+      // จึงดึงรายการรูปจริงจากเซิร์ฟเวอร์มาเทียบ แล้วแจ้งเฉพาะรูปที่ไม่อยู่ในระบบจริง
+      return fetchPhotos(room).then(function (list) {
+        var added = list.filter(function (p) { return known.indexOf(p.id) < 0; }).length;
+        var lost = files.length - added;
+        if (lost > 0) toast('อัปโหลดไม่สำเร็จ ' + lost + ' รูป: ' + failed[0] + ' — ลองเลือกรูปนั้นใหม่อีกครั้ง', 'error');
+        else toast('อัปโหลดรูปห้อง ' + room + ' แล้ว ' + files.length + ' รูป', 'ok');
+      }, function () {
+        toast('ไม่แน่ใจว่าอัปโหลดสำเร็จ ' + failed.length + ' รูป กดเลือกห้องใหม่เพื่อตรวจรายการรูปอีกครั้ง', 'error');
+      });
+    });
+  });
+
+  function b64ToBytes(b64) {
+    var bin = atob(b64), u = new Uint8Array(bin.length);
+    for (var i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
+    return u;
+  }
+
+  // รูปสำหรับใส่ท้ายบันทึกข้อความ: ใช้ที่อัปโหลดรอบนี้ ถ้าไม่มีค่อยโหลดจาก Drive
+  // รูปที่โหลดไม่ได้ (เช่น ถูกลบใน Drive ตรง ๆ) จะข้ามไป ไม่ทำให้สร้างไฟล์ Word ไม่สำเร็จทั้งไฟล์
+  function memoPhotos(room) {
+    var missing = 0;
+    // รายการรูปยังโหลดไม่เสร็จ/โหลดไม่สำเร็จ โหลดก่อน ไม่งั้นไฟล์ Word จะไม่มีรูปโดยไม่มีใครรู้
+    var listed = !API_URL || state.photosLoaded ? Promise.resolve(state.photos) : fetchPhotos(room);
+    return listed.then(function (photos) {
+      return Promise.all(photos.map(photoForMemo));
+    }).then(function (list) {
+      if (missing && state.room === room) fetchPhotos(room).catch(function () { /* ไม่เป็นไร */ });
+      var out = list.filter(Boolean).map(function (d) { return { data: b64ToBytes(d.b64), w: d.w, h: d.h, ext: d.ext }; });
+      out.missing = missing;   // ให้ผู้เรียกแจ้งเตือนรวมกับข้อความอื่น (toast ซ้อนกันจะเห็นแค่อันสุดท้าย)
+      return out;
+    });
+
+    function photoForMemo(p) {
+      if (photoData[p.id]) return Promise.resolve(photoData[p.id]);
+      return apiGet({ action: 'photo', room: room, id: p.id }, { tries: 2 }).then(function (res) {
+        return loadImage('data:' + res.mimeType + ';base64,' + res.data).then(function (img) {
+          var d = res.mimeType === 'image/jpeg' || res.mimeType === 'image/png'
+            ? { b64: res.data, w: img.naturalWidth, h: img.naturalHeight, ext: res.mimeType === 'image/png' ? 'png' : 'jpg' }
+            : (function () { var j = toJpeg(img, 1600, 0.85); return { b64: j.url.slice(j.url.indexOf(',') + 1), w: j.w, h: j.h, ext: 'jpg' }; })();
+          photoData[p.id] = d;
+          return d;
+        });
+      }).catch(function () { missing++; return null; });
+    }
+  }
+
   // บันทึกข้อความ (Word) เสนอผู้อำนวยการ
   var garudaCache = null;
   $('downloadMemo').addEventListener('click', function () {
     if (state.busy || !checkRoom()) return;
+    if (uploads.some(function (u) { return u.room === state.room; })) {
+      toast('กำลังอัปโหลดรูปอยู่ รอให้เสร็จก่อนแล้วค่อยดาวน์โหลด', 'info');
+      return;
+    }
     var p = roomPayload();
     var label = classLabel(p.room);
+    var missingPhotos = 0;
     var data = {
       schoolName: SCHOOL.name,
       affiliation: CFG.AFFILIATION || 'สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสระบุรี เขต 2',
@@ -743,7 +1036,13 @@
       return r.arrayBuffer();
     })).then(function (buf) {
       garudaCache = buf;
-      return window.FloodMemo.build(JSZip, buf, data, 'blob');
+      return memoPhotos(p.room).catch(function (err) {
+        throw new Error('โหลดรูปประกอบไม่สำเร็จ (' + err.message + ')');
+      });
+    }).then(function (photos) {
+      data.photos = photos;
+      missingPhotos = photos.missing || 0;
+      return window.FloodMemo.build(JSZip, garudaCache, data, 'blob');
     }).then(function (blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
@@ -753,7 +1052,8 @@
       setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
     });
     withBusy($('downloadMemo'), 'กำลังสร้าง…', job).then(function () {
-      if (!p.teacherName) toast('ดาวน์โหลดแล้ว ยังไม่ได้กรอกชื่อครูผู้รายงาน ในไฟล์จะเป็นจุดไข่ปลา', 'info');
+      if (missingPhotos) toast('ดาวน์โหลดแล้ว แต่มี ' + missingPhotos + ' รูปที่โหลดไม่ได้ (อาจถูกลบใน Google Drive) ไฟล์ Word จึงไม่มีรูปนั้น', 'info');
+      else if (!p.teacherName) toast('ดาวน์โหลดแล้ว ยังไม่ได้กรอกชื่อครูผู้รายงาน ในไฟล์จะเป็นจุดไข่ปลา', 'info');
       else if (!data.directorName) toast('ดาวน์โหลดแล้ว ชื่อผู้อำนวยการยังว่าง (กรอกได้ในหน้า "สรุปทั้งโรงเรียน")', 'info');
       else if (state.dirty && API_URL) toast('ดาวน์โหลดแล้ว อย่าลืมกด "บันทึกห้องนี้" ด้วย', 'info');
     }).catch(function (err) { toast('สร้างไฟล์ไม่สำเร็จ: ' + err.message, 'error'); });

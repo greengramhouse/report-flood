@@ -92,9 +92,9 @@
     return '<w:tc><w:tcPr>' + tc + '</w:tcPr>' + para(run(content, { b: o.b }), { jc: o.jc || 'left' }) + '</w:tc>';
   }
 
-  function image(rid, cx, cy) {
+  function image(rid, cx, cy, docId, title) {
     return '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">' +
-      '<wp:extent cx="' + cx + '" cy="' + cy + '"/><wp:docPr id="1" name="ตราครุฑ"/>' +
+      '<wp:extent cx="' + cx + '" cy="' + cy + '"/><wp:docPr id="' + (docId || 1) + '" name="' + esc(title || 'ตราครุฑ') + '"/>' +
       '<wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>' +
       '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic>' +
       '<pic:nvPicPr><pic:cNvPr id="0" name="garuda.png"/><pic:cNvPicPr/></pic:nvPicPr>' +
@@ -193,6 +193,16 @@
     x.push(para(run('(' + (d.directorName || DOTS) + ')'), { indLeft: SIGN_IND, jc: 'center', keepNext: true }));
     x.push(para(run('ผู้อำนวยการ' + schoolName), { indLeft: SIGN_IND, jc: 'center', keepNext: true }));
     x.push(para(run('วันที่ ........ / ................. / ...........'), { indLeft: SIGN_IND, jc: 'center' }));
+
+    // ภาพประกอบ: ขึ้นหน้าใหม่ หน้าละ 2 รูป
+    if (img.photos && img.photos.length) {
+      x.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
+      x.push(para(run('ภาพประกอบ สภาพความเสียหายจากเหตุอุทกภัย ' + cls, { b: true, sz: 18 }), { jc: 'center', after: 120 }));
+      img.photos.forEach(function (p, i) {
+        x.push(para([image(p.rid, p.cx, p.cy, i + 2, 'ภาพที่ ' + (i + 1))], { jc: 'center', before: 120, keepNext: true }));
+        x.push(para(run('ภาพที่ ' + (i + 1)), { jc: 'center', after: 120 }));
+      });
+    }
     return x.join('');
   }
 
@@ -262,6 +272,7 @@
   var CONTENT_TYPES = XML + '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' +
     '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' +
     '<Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/>' +
+    '<Default Extension="jpg" ContentType="image/jpeg"/>' +
     '<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>' +
     '<Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>' +
     '<Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>' +
@@ -278,8 +289,12 @@
   var DOC_RELS = XML + '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' +
     '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>' +
-    '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/garuda.png"/>' +
-    '</Relationships>';
+    '<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/garuda.png"/>';
+  function docRels(photos) {
+    return DOC_RELS + photos.map(function (p) {
+      return '<Relationship Id="' + p.rid + '" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="' + p.target + '"/>';
+    }).join('') + '</Relationships>';
+  }
 
   function coreXml(title) {
     var now = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
@@ -302,23 +317,31 @@
    * @param JSZip   คลาส JSZip
    * @param garuda  ArrayBuffer/Buffer ของไฟล์ครุฑ (PNG)
    * @param d { schoolName, affiliation, classLabel, totalStudents, teacherName, teacherPhone, directorName,
-   *            dateText, docNo, students:[{name, classLabel?, book, supplies, uniform, note}] }  (เฉพาะคนที่ได้รับผลกระทบ)
+   *            dateText, docNo, students:[{name, classLabel?, book, supplies, uniform, note}],  (เฉพาะคนที่ได้รับผลกระทบ)
+   *            photos?:[{data, w, h, ext}] }  ภาพประกอบ (data = ArrayBuffer/Uint8Array, ext = 'jpg' | 'png')
    * @param outType 'blob' (เบราว์เซอร์) หรือ 'nodebuffer'
    */
   function build(JSZip, garuda, d, outType) {
     var size = pngSize(garuda);
     var cy = Math.round(1.5 * EMU_CM);                    // ครุฑสูง 1.5 ซม.
     var cx = Math.round(cy * size.w / size.h);
+    // ภาพประกอบกว้างไม่เกิน 14 ซม. สูงไม่เกิน 10.5 ซม. (หน้าละ 2 รูป)
+    var photos = (d.photos || []).map(function (p, i) {
+      var k = Math.min(14 * EMU_CM / p.w, 10.5 * EMU_CM / p.h);
+      return { rid: 'rIdP' + (i + 1), target: 'media/photo' + (i + 1) + '.' + p.ext, data: p.data,
+        cx: Math.round(p.w * k), cy: Math.round(p.h * k) };
+    });
     var zip = new JSZip();
     zip.file('[Content_Types].xml', CONTENT_TYPES);
     zip.file('_rels/.rels', ROOT_RELS);
     zip.file('docProps/core.xml', coreXml('รายงานผลการตรวจสอบความเสียหายของนักเรียน ' + (d.classLabel || '')));
     zip.file('docProps/app.xml', APP);
-    zip.file('word/_rels/document.xml.rels', DOC_RELS);
+    zip.file('word/_rels/document.xml.rels', docRels(photos));
     zip.file('word/styles.xml', STYLES);
     zip.file('word/settings.xml', SETTINGS);
     zip.file('word/media/garuda.png', garuda);
-    zip.file('word/document.xml', documentXml(d, { rid: 'rId3', cx: cx, cy: cy }));
+    photos.forEach(function (p) { zip.file('word/' + p.target, p.data); });
+    zip.file('word/document.xml', documentXml(d, { rid: 'rId3', cx: cx, cy: cy, photos: photos }));
     return zip.generateAsync({
       type: outType || 'blob',
       compression: 'DEFLATE',

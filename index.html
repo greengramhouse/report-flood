@@ -158,6 +158,36 @@
   .icon-btn { width: 2.25rem; height: 2.25rem; display: inline-grid; place-items: center; border-radius: 6px; color: var(--muted); background: transparent; border: 0; cursor: pointer; }
   .icon-btn:hover { color: var(--danger); background: var(--danger-soft); }
 
+  /* รูปภาพสภาพน้ำท่วม */
+  .photo-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr)); gap: .5rem; }
+  @media (min-width: 640px) { .photo-grid { grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr)); } }
+  .photo { position: relative; aspect-ratio: 1; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--bg); }
+  .photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .photo a { display: block; height: 100%; }
+  .photo-ph { display: flex; height: 100%; align-items: center; justify-content: center; font-size: .875rem; color: var(--accent); }
+  .photo .del { position: absolute; top: .25rem; right: .25rem; width: 2rem; height: 2rem; display: grid; place-items: center; border: 0; border-radius: 999px;
+    background: rgb(0 0 0 / .6); color: #fff; font-size: 1.1rem; line-height: 1; cursor: pointer; }
+  .photo .del:hover { background: var(--danger); }
+  .photo.pending img { opacity: .45; }
+  .photo.deleting img { opacity: .3; filter: grayscale(1); }
+  .photo .del-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .3rem;
+    color: var(--danger); font-size: .8rem; font-weight: 600; }
+  .photo .up { position: absolute; left: .35rem; right: .35rem; bottom: .35rem; display: grid; gap: .2rem; padding: .3rem .4rem; border-radius: 6px;
+    background: rgb(255 255 255 / .9); color: #17222c; font-size: .72rem; line-height: 1.2; }
+  .bar { height: .45rem; border-radius: 999px; background: var(--accent-soft); overflow: hidden; }
+  .photo .up .bar { background: #d8e6ee; height: .35rem; }
+  .bar span { display: block; height: 100%; width: 0; border-radius: inherit; background: var(--accent); transition: width .3s ease; }
+  .photo .up .bar span { background: #0e5a78; }
+  .photo-progress { display: grid; gap: .3rem; padding: .6rem .75rem; border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft); font-size: .9rem; }
+  .photo-progress .pp-row { display: flex; justify-content: space-between; gap: .5rem; color: var(--accent); font-weight: 600; }
+  .photo-progress .bar { background: var(--surface); height: .55rem; }
+  @media (prefers-reduced-motion: reduce) { .bar span { transition: none; } }
+  .photo-add { aspect-ratio: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: .15rem; border: 2px dashed var(--line);
+    border-radius: 8px; background: var(--surface); color: var(--accent); font-family: var(--font-display); font-weight: 600; cursor: pointer; }
+  .photo-add:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+  .photo-add:disabled { opacity: .55; cursor: not-allowed; }
+  .photo-add b { font-size: 1.6rem; line-height: 1; }
+
   dialog { border: 1px solid var(--line); border-radius: 10px; padding: 0; background: var(--surface); color: var(--ink); width: min(30rem, calc(100vw - 2rem)); }
   dialog::backdrop { background: rgb(10 20 30 / .45); }
 
@@ -251,6 +281,22 @@
     <div class="mt-4">
       <button type="button" class="btn btn-ghost w-full sm:w-auto" id="addManual">+ เพิ่มนักเรียนที่ไม่อยู่ในรายชื่อ</button>
     </div>
+  </section>
+
+  <section id="photoSection" class="card" aria-labelledby="h-photos" hidden>
+    <div class="flex flex-wrap items-baseline gap-x-2 gap-y-0">
+      <span class="font-display font-bold text-accent">4</span>
+      <h2 id="h-photos" class="text-lg font-semibold sm:text-xl">รูปภาพสภาพน้ำท่วม</h2>
+      <span class="text-sm text-muted">(ไม่บังคับ)</span>
+    </div>
+    <p class="mt-1 text-sm text-muted">เลือกรูปแล้วระบบจะอัปโหลดทันที ไม่ต้องกดบันทึก รูปจะอยู่ท้ายบันทึกข้อความ (Word) ห้องละไม่เกิน 10 รูป</p>
+    <div id="photoProgress" class="photo-progress mt-3" role="status" hidden>
+      <div class="pp-row"><span id="photoProgressText"></span><span id="photoProgressPct" class="num"></span></div>
+      <div class="bar"><span id="photoProgressBar"></span></div>
+    </div>
+    <div id="photoGrid" class="photo-grid mt-3"></div>
+    <p id="photoMsg" class="mt-2 text-sm text-muted" hidden></p>
+    <input type="file" id="photoInput" accept="image/*" multiple class="sr-only" tabindex="-1" aria-hidden="true">
   </section>
 </main>
 

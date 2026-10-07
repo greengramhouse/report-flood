@@ -8,7 +8,8 @@
  *  3. ทำให้ใช้งานได้ > การทำให้ใช้งานได้รายการใหม่ > ประเภท: เว็บแอป
  *     - เรียกใช้ในฐานะ: ฉัน   - ผู้มีสิทธิ์เข้าถึง: ทุกคน
  *  4. คัดลอก URL ที่ลงท้ายด้วย /exec ไปใส่ใน assets/config.js (API_URL)
- *  5. (แนะนำ) เรียกใช้ installRosterTrigger 1 ครั้ง ให้ดึงรายชื่อนักเรียนมาเก็บในชีต Roster ทุกวันอัตโนมัติ
+ *     (ถ้าอัปเดตโค้ดจากเวอร์ชันเก่า ให้เรียกใช้ setup อีกครั้ง เพื่ออนุญาตสิทธิ์ Google Drive สำหรับเก็บรูป)
+ *  5. (แนะนำ) เรียกใช้ installTriggers 1 ครั้ง ให้ดึงรายชื่อนักเรียนลงชีต Roster ทุกวัน และล้างรูปที่ถูกลบใน Drive ทุกชั่วโมง
  */
 
 // API รายชื่อนักเรียนต้นทาง (ตอบช้า ~5 วินาที จึงดึงมาเก็บไว้ในชีต Roster แล้วให้หน้าเว็บอ่านจากที่นี่แทน)
@@ -18,6 +19,14 @@ var SHEET_ROOMS = 'Rooms';
 var SHEET_STUDENTS = 'Students';
 var SHEET_SETTINGS = 'Settings';
 var SHEET_ROSTER = 'Roster';
+var SHEET_PHOTOS = 'Photos';
+
+// โฟลเดอร์ Google Drive เก็บรูปสภาพน้ำท่วม (ระบบสร้างโฟลเดอร์ย่อยตามชื่อห้องให้เอง)
+// เจ้าของสคริปต์ต้องมีสิทธิ์แก้ไขโฟลเดอร์นี้
+var PHOTO_FOLDER_ID = '1ews70RGnNhcRoNg_iQQ8nPV7iDcAcBKo';
+var MAX_PHOTOS = 10;                 // ต่อห้อง
+var MAX_PHOTO_B64 = 8 * 1024 * 1024; // หน้าเว็บย่อรูปก่อนส่งแล้ว ปกติไม่ถึง 1 MB
+var PHOTO_TYPES = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' };
 
 var HEADERS = {
   Rooms: ['ห้องเรียน', 'ชั้น', 'ครูผู้รายงาน', 'โทรศัพท์', 'วันที่รายงาน', 'จำนวนนักเรียนที่ได้รับผลกระทบ',
@@ -26,14 +35,16 @@ var HEADERS = {
     'หนังสือเรียน', 'อุปกรณ์การเรียน', 'เครื่องแบบนักเรียน', 'หมายเหตุ', 'ที่มา', 'บันทึกล่าสุด'],
   Settings: ['key', 'รายการ', 'ค่า'],
   // ใช้ชื่อฟิลด์เดียวกับ API ต้นทาง หน้าเว็บจะได้อ่านได้เหมือนเดิม
-  Roster: ['classroom', 'no', 'student_id', 'citizen_id', 'prefix', 'first_name', 'last_name']
+  Roster: ['classroom', 'no', 'student_id', 'citizen_id', 'prefix', 'first_name', 'last_name'],
+  Photos: ['ห้องเรียน', 'fileId', 'ชื่อไฟล์', 'ลิงก์', 'รูปย่อ', 'อัปโหลดเมื่อ']
 };
 // คอลัมน์ที่ต้องเก็บเป็นข้อความ (กันเลข 0 นำหน้าหาย / เลข 13 หลักกลายเป็น 1.1E+12 / วันที่ถูกแปลง)
 var TEXT_COLS = {
   Rooms: [1, 2, 4, 5, 10],
   Students: [1, 2, 4, 5, 12],
   Settings: [1, 3],
-  Roster: [1, 3, 4, 5, 6, 7]
+  Roster: [1, 3, 4, 5, 6, 7],
+  Photos: [1, 2, 3, 4, 5, 6]
 };
 var SETTINGS = [
   ['directorName', 'ผู้อำนวยการโรงเรียน (ชื่อ - สกุล)'],
@@ -46,7 +57,7 @@ var SETTINGS = [
 // ---------------- ติดตั้ง ----------------
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  [SHEET_ROOMS, SHEET_STUDENTS, SHEET_SETTINGS, SHEET_ROSTER].forEach(function (name) {
+  [SHEET_ROOMS, SHEET_STUDENTS, SHEET_SETTINGS, SHEET_ROSTER, SHEET_PHOTOS].forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
     var h = HEADERS[name];
     sh.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold').setBackground('#fde68a');
@@ -60,6 +71,7 @@ function setup() {
   [SHEET_ROOMS, SHEET_STUDENTS, SHEET_SETTINGS].forEach(function (name) {
     ss.getSheetByName(name).autoResizeColumns(1, HEADERS[name].length);
   });
+  checkPhotoFolder();
   var first = ss.getSheets()[0];
   if ((first.getName() === 'Sheet1' || first.getName() === 'ชีต1') && first.getLastRow() === 0) ss.deleteSheet(first);
 }
@@ -70,7 +82,9 @@ function doGet(e) {
   return handle_(function () {
     if (p.action === 'rooms') return cached_('rooms', function () { return { rooms: getRooms_(), settings: getSettings_() }; });
     if (p.action === 'room') return cached_('room:' + str_(p.room), function () { return getRoom_(p.room); });
-    if (p.action === 'roster') return cached_('roster', getRoster_);
+    if (p.action === 'roster') return cached_('roster', getRoster_, LONG_CACHE_SECONDS);
+    if (p.action === 'photos') return cached_('photos:' + str_(p.room), function () { return { photos: getPhotos_(p.room) }; }, LONG_CACHE_SECONDS);
+    if (p.action === 'photo') return getPhoto_(p.room, p.id);
     if (p.action === 'all') return cached_('all', function () { return { rooms: getRooms_(), settings: getSettings_(), students: getStudents_() }; });
     return { message: 'API พร้อมใช้งาน' };
   });
@@ -78,13 +92,15 @@ function doGet(e) {
 
 // ---------------- cache (ลดการอ่านชีตเมื่อหลายคนเปิดพร้อมกัน) ----------------
 var CACHE_SECONDS = 300;
+// รายชื่อ/รูป เปลี่ยนเฉพาะตอน syncRoster / อัปโหลด / ลบรูป ซึ่งล้าง cache ให้เองอยู่แล้ว จึงเก็บได้นานสุดที่ CacheService ยอม (6 ชม.)
+var LONG_CACHE_SECONDS = 21600;
 
-function cached_(key, fn) {
+function cached_(key, fn, seconds) {
   var cache = CacheService.getScriptCache();
   var hit = cache.get(key);
   if (hit) return JSON.parse(hit);
   var value = fn();
-  try { cache.put(key, JSON.stringify(value), CACHE_SECONDS); } catch (e) { /* ใหญ่เกิน 100KB ก็ไม่ cache */ }
+  try { cache.put(key, JSON.stringify(value), seconds || CACHE_SECONDS); } catch (e) { /* ใหญ่เกิน 100KB ก็ไม่ cache */ }
   return value;
 }
 
@@ -103,6 +119,8 @@ function doPost(e) {
     if (body.action === 'saveSettings') return saveSettings_(body.data);
     // ไม่ส่ง students = ดึงจาก STUDENT_API_URL ใหม่, ส่ง students (array แบบเดียวกับ API ต้นทาง) = เขียนลงชีตตามนั้น
     if (body.action === 'syncRoster') return syncRoster_(body.students);
+    if (body.action === 'uploadPhoto') return uploadPhoto_(body.data);
+    if (body.action === 'deletePhoto') return deletePhoto_(body.data);
     throw new Error('ไม่รู้จักคำสั่ง: ' + body.action);
   });
 }
@@ -129,6 +147,17 @@ function rows_(sh) {
   var n = sh.getLastRow() - 1;
   if (n < 1) return [];
   return sh.getRange(2, 1, n, sh.getLastColumn()).getValues();
+}
+
+// ชีตที่เพิ่มภายหลัง (Roster / Photos) สร้างให้เองถ้ายังไม่มี ไม่ต้องเรียก setup ใหม่
+function ensureSheet_(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(name);
+  if (sh) return sh;
+  sh = ss.insertSheet(name);
+  sh.getRange(1, 1, 1, HEADERS[name].length).setValues([HEADERS[name]]).setFontWeight('bold').setBackground('#fde68a');
+  sh.setFrozenRows(1);
+  return sh;
 }
 
 function str_(v) {
@@ -281,6 +310,16 @@ function installRosterTrigger() {
   syncRoster();
 }
 
+// ตั้ง trigger ทั้งหมด: ดึงรายชื่อทุกวันตี 5 + ล้างรูปที่ถูกลบใน Drive ทุกชั่วโมง (เรียกซ้ำได้ ไม่สร้างซ้ำ)
+function installTriggers() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'cleanupPhotos') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('cleanupPhotos').timeBased().everyHours(1).create();
+  installRosterTrigger();
+  cleanupPhotos();
+}
+
 function fetchRoster_() {
   var res = UrlFetchApp.fetch(STUDENT_API_URL, { muteHttpExceptions: true, followRedirects: true });
   if (res.getResponseCode() !== 200) throw new Error('API รายชื่อนักเรียนตอบกลับ ' + res.getResponseCode());
@@ -299,13 +338,7 @@ function syncRoster_(list) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var ss = SpreadsheetApp.getActiveSpreadsheet();
-    var sh = ss.getSheetByName(SHEET_ROSTER);
-    if (!sh) {
-      sh = ss.insertSheet(SHEET_ROSTER);
-      sh.getRange(1, 1, 1, HEADERS.Roster.length).setValues([HEADERS.Roster]).setFontWeight('bold').setBackground('#fde68a');
-      sh.setFrozenRows(1);
-    }
+    var sh = ensureSheet_(SHEET_ROSTER);
     var width = HEADERS.Roster.length;
     if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(width, sh.getLastColumn())).clearContent();
     TEXT_COLS.Roster.forEach(function (c) { sh.getRange(2, c, rows.length, 1).setNumberFormat('@'); });
@@ -331,4 +364,178 @@ function getRoster_() {
     return o;
   });
   return { students: students, syncedAt: PropertiesService.getScriptProperties().getProperty('rosterSyncedAt') || '' };
+}
+
+// ---------------- รูปภาพสภาพน้ำท่วม ----------------
+function photoFromRow_(r) {
+  return { room: str_(r[0]), id: str_(r[1]), name: str_(r[2]), url: str_(r[3]), thumb: str_(r[4]), uploadedAt: str_(r[5]) };
+}
+
+// นับรูปของห้องจากคอลัมน์ห้องอย่างเดียว (ไม่อ่านรูปย่อทั้งชีต เร็วกว่า getPhotos_)
+function countPhotos_(sh, room) {
+  var n = sh.getLastRow() - 1;
+  if (n < 1) return 0;
+  return sh.getRange(2, 1, n, 1).getValues().filter(function (r) { return str_(r[0]) === room; }).length;
+}
+
+function getPhotos_(room) {
+  room = str_(room);
+  return rows_(ensureSheet_(SHEET_PHOTOS)).map(photoFromRow_).filter(function (p) { return p.id && p.room === room; });
+}
+
+// ส่งไฟล์รูปเต็ม (base64) ให้หน้าเว็บใส่ในบันทึกข้อความ Word
+// อ่านได้เฉพาะไฟล์ที่อยู่ในชีต Photos ของห้องนั้น กันการใช้ id อ่านไฟล์อื่นใน Drive ของเจ้าของสคริปต์
+function getPhoto_(room, id) {
+  var ok = getPhotos_(room).some(function (p) { return p.id === str_(id); });
+  if (!ok) throw new Error('ไม่พบรูปนี้ในห้อง ' + str_(room));
+  var file = photoFile_(str_(id));
+  if (!file) {
+    // ไฟล์ถูกลบใน Drive โดยตรง ล้างแถวนี้ออกจากชีตเลย
+    removePhotoRows_(function (r) { return str_(r[1]) === str_(id); });
+    throw new Error('รูปนี้ถูกลบออกจาก Google Drive แล้ว');
+  }
+  var blob = file.getBlob();
+  return { mimeType: blob.getContentType(), data: Utilities.base64Encode(blob.getBytes()) };
+}
+
+// คืนไฟล์ ถ้าไฟล์ถูกลบ/อยู่ในถังขยะ คืน null (error อื่น เช่น Drive ล่มชั่วคราว ให้โยนต่อ จะได้ไม่ลบแถวผิด)
+function photoFile_(id) {
+  try {
+    var f = DriveApp.getFileById(id);
+    return f.isTrashed() ? null : f;
+  } catch (e) {
+    if (/not found|could not be found|no item|ไม่พบ/i.test(String(e && e.message))) return null;
+    throw e;
+  }
+}
+
+// ลบแถวในชีต Photos ที่ตรงเงื่อนไข แล้วล้าง cache ของห้องที่เกี่ยวข้อง คืนจำนวนแถวที่ลบ
+function removePhotoRows_(match) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sh = ensureSheet_(SHEET_PHOTOS);
+    var rows = rows_(sh), rooms = {}, removed = 0;
+    for (var i = rows.length - 1; i >= 0; i--) {
+      if (!match(rows[i])) continue;
+      rooms['photos:' + str_(rows[i][0])] = true;
+      sh.deleteRow(i + 2);
+      removed++;
+    }
+    if (removed) {
+      SpreadsheetApp.flush();
+      CacheService.getScriptCache().removeAll(Object.keys(rooms));
+    }
+    return removed;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ล้างแถวรูปที่ไฟล์ถูกลบใน Google Drive โดยตรง (ไม่ได้ลบผ่านปุ่ม × บนหน้าเว็บ)
+// เรียกใช้จาก editor ได้ทันที และ installTriggers ตั้งให้ทำงานเองทุกชั่วโมง
+function cleanupPhotos() {
+  var gone = {};
+  rows_(ensureSheet_(SHEET_PHOTOS)).forEach(function (r) {
+    var id = str_(r[1]);
+    if (id && !photoFile_(id)) gone[id] = true;
+  });
+  var removed = removePhotoRows_(function (r) { return gone[str_(r[1])]; });
+  Logger.log('ล้างรูปที่ถูกลบใน Drive แล้ว ' + removed + ' รูป');
+}
+
+// ขอสิทธิ์ Google Drive แบบเต็ม (สร้างโฟลเดอร์/ไฟล์) แล้วลองสร้างโฟลเดอร์ทดสอบจริง 1 ครั้ง
+// เรียกใช้จาก editor ได้โดยตรง ถ้าอัปโหลดรูปขึ้นว่า "ไม่ได้รับอนุญาต" ให้เรียกฟังก์ชันนี้
+function checkPhotoFolder() {
+  ScriptApp.requireScopes(ScriptApp.AuthMode.FULL, ['https://www.googleapis.com/auth/drive']);
+  var folder = DriveApp.getFolderById(PHOTO_FOLDER_ID);
+  var test = folder.createFolder('_ทดสอบสิทธิ์_ลบได้');
+  test.setTrashed(true);
+  Logger.log('เข้าถึงและเขียนโฟลเดอร์รูปได้แล้ว: ' + folder.getName());
+}
+
+// จำ id โฟลเดอร์ของแต่ละห้องไว้ ไม่ต้องค้นหาใน Drive ทุกครั้งที่อัปรูป
+function roomFolder_(room) {
+  var props = PropertiesService.getScriptProperties();
+  var key = 'photoFolder:' + PHOTO_FOLDER_ID + ':' + room;
+  var id = props.getProperty(key);
+  if (id) {
+    // ไม่เช็ก isTrashed เพื่อประหยัดเวลา (ต้องเรียก Drive อีกรอบ) ถ้าลบโฟลเดอร์ห้องทิ้งเอง ให้ลบ property นี้ด้วย
+    try { return DriveApp.getFolderById(id); } catch (e) { /* โฟลเดอร์ถูกลบถาวร สร้างใหม่ด้านล่าง */ }
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    // กันสองคนอัปห้องเดียวกันพร้อมกันแล้วได้โฟลเดอร์ซ้ำ
+    var parent = DriveApp.getFolderById(PHOTO_FOLDER_ID);
+    var it = parent.getFoldersByName(room);
+    var folder = it.hasNext() ? it.next() : parent.createFolder(room);
+    props.setProperty(key, folder.getId());
+    return folder;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function uploadPhoto_(d) {
+  if (!d) throw new Error('ไม่มีข้อมูล');
+  var room = str_(d.room);
+  if (!room || room.length > 40) throw new Error('ชื่อห้องเรียนไม่ถูกต้อง');
+  var ext = PHOTO_TYPES[str_(d.mimeType)];
+  if (!ext) throw new Error('รองรับเฉพาะไฟล์รูป JPG, PNG หรือ WEBP');
+  var data = str_(d.data);
+  if (!data) throw new Error('ไม่มีไฟล์รูป');
+  if (data.length > MAX_PHOTO_B64) throw new Error('ไฟล์รูปใหญ่เกินไป');
+  var thumb = str_(d.thumb);
+  if (!/^data:image\/jpeg;base64,[A-Za-z0-9+\/=]+$/.test(thumb) || thumb.length > 45000) thumb = '';
+
+  var full = 'ห้องนี้มีรูปครบ ' + MAX_PHOTOS + ' รูปแล้ว';
+
+  // สร้างไฟล์ใน Drive (ส่วนที่ช้าที่สุด) นอก lock ครูห้องอื่นจะได้ไม่ต้องรอคิว
+  var now = now_();
+  var name = room.replace(/[\\\/:*?"<>|]/g, '-') + '_' + now.replace(/[-: ]/g, '') + '_' +
+    Utilities.getUuid().slice(0, 4) + '.' + ext;
+  var blob = Utilities.newBlob(Utilities.base64Decode(data), str_(d.mimeType), name);
+  var folder = roomFolder_(room);
+  var file = folder.createFile(blob);
+  var row = [room, file.getId(), name, file.getUrl(), thumb, now];
+
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(30000);
+    // นับจำนวนใน lock กันอัปห้องเดียวกันพร้อมกันหลายรูปจนเกิน MAX_PHOTOS
+    var sh = ensureSheet_(SHEET_PHOTOS);
+    if (countPhotos_(sh, room) >= MAX_PHOTOS) throw new Error(full);
+    var target = sh.getLastRow() + 1;
+    sh.getRange(target, 1, 1, row.length).setNumberFormat('@').setValues([row]);
+    SpreadsheetApp.flush();
+  } catch (err) {
+    // บันทึกลงชีตไม่ได้ ลบไฟล์ทิ้ง กันรูปค้างใน Drive โดยไม่มีในรายการ
+    file.setTrashed(true);
+    throw err;
+  } finally {
+    lock.releaseLock();
+  }
+  CacheService.getScriptCache().remove('photos:' + room);
+  return { photo: photoFromRow_(row) };
+}
+
+function deletePhoto_(d) {
+  if (!d) throw new Error('ไม่มีข้อมูล');
+  var room = str_(d.room), id = str_(d.id);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sh = ensureSheet_(SHEET_PHOTOS);
+    var idx = -1;
+    rows_(sh).some(function (r, i) { if (str_(r[0]) === room && str_(r[1]) === id) { idx = i; return true; } return false; });
+    if (idx < 0) throw new Error('ไม่พบรูปนี้ในห้อง ' + room);
+    try { DriveApp.getFileById(id).setTrashed(true); } catch (e) { /* ไฟล์ถูกลบใน Drive ไปแล้ว ลบแถวต่อได้ */ }
+    sh.deleteRow(idx + 2);
+    SpreadsheetApp.flush();
+    CacheService.getScriptCache().remove('photos:' + room);
+    return { id: id };
+  } finally {
+    lock.releaseLock();
+  }
 }
