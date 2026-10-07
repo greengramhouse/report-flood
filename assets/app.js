@@ -706,6 +706,46 @@
       }).catch(function (err) { toast('สร้างไฟล์ไม่สำเร็จ: ' + err.message, 'error'); });
   });
 
+  // บันทึกข้อความ (Word) เสนอผู้อำนวยการ
+  var garudaCache = null;
+  $('downloadMemo').addEventListener('click', function () {
+    if (state.busy || !checkRoom()) return;
+    var p = roomPayload();
+    var label = classLabel(p.room);
+    var data = {
+      schoolName: SCHOOL.name,
+      affiliation: CFG.AFFILIATION || 'สำนักงานเขตพื้นที่การศึกษาประถมศึกษาสระบุรี เขต 2',
+      classLabel: label,
+      // นักเรียนทั้งหมดในห้อง = รายชื่อจากระบบ + ที่ครูเพิ่มเอง (ที่มีชื่อ)
+      totalStudents: state.rows.filter(function (r) { return !r.manual || String(r.name || '').trim(); }).length,
+      teacherName: p.teacherName, teacherPhone: p.teacherPhone,
+      directorName: state.settings.directorName || '',
+      dateText: thaiDate(p.reportDate),
+      students: p.students.map(function (s) {
+        return { name: s.name, classLabel: label, book: s.book, supplies: s.supplies, uniform: s.uniform, note: s.note };
+      })
+    };
+    var job = (garudaCache ? Promise.resolve(garudaCache) : fetch('assets/garuda.png').then(function (r) {
+      if (!r.ok) throw new Error('ไม่พบไฟล์ assets/garuda.png');
+      return r.arrayBuffer();
+    })).then(function (buf) {
+      garudaCache = buf;
+      return window.FloodMemo.build(JSZip, buf, data, 'blob');
+    }).then(function (blob) {
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'บันทึกข้อความ_อุทกภัย_' + fileSafe(p.room) + (SCHOOL.name ? '_' + fileSafe(SCHOOL.name) : '') + '.docx';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+    });
+    withBusy($('downloadMemo'), 'กำลังสร้าง…', job).then(function () {
+      if (!p.teacherName) toast('ดาวน์โหลดแล้ว ยังไม่ได้กรอกชื่อครูผู้รายงาน ในไฟล์จะเป็นจุดไข่ปลา', 'info');
+      else if (!data.directorName) toast('ดาวน์โหลดแล้ว ชื่อผู้อำนวยการยังว่าง (กรอกได้ในหน้า "สรุปทั้งโรงเรียน")', 'info');
+      else if (state.dirty && API_URL) toast('ดาวน์โหลดแล้ว อย่าลืมกด "บันทึกห้องนี้" ด้วย', 'info');
+    }).catch(function (err) { toast('สร้างไฟล์ไม่สำเร็จ: ' + err.message, 'error'); });
+  });
+
   // ---------------- สรุปทั้งโรงเรียน ----------------
   function fillSettings() {
     settingFields.forEach(function (k) {

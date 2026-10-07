@@ -315,9 +315,10 @@
       <b id="barRoom">–</b> · ได้รับผลกระทบ <b id="sumAll">0</b> คน
       <span class="text-muted">(หนังสือ <span id="sumBook">0</span> · อุปกรณ์ <span id="sumSupplies">0</span> · เครื่องแบบ <span id="sumUniform">0</span>)</span>
     </p>
-    <div class="grid grid-cols-2 gap-2 sm:ml-auto sm:flex">
-      <button type="button" class="btn btn-ghost" id="downloadRoom">ดาวน์โหลด Excel</button>
-      <button type="button" class="btn btn-primary" id="saveRoom">บันทึกห้องนี้</button>
+    <div class="grid grid-cols-3 gap-2 sm:ml-auto sm:flex">
+      <button type="button" class="btn btn-ghost px-2 sm:px-4" id="downloadRoom" title="ดาวน์โหลดแบบรายงาน Excel ของห้องนี้"><span class="sm:hidden">⬇ Excel</span><span class="hidden sm:inline">ดาวน์โหลด Excel</span></button>
+      <button type="button" class="btn btn-ghost px-2 sm:px-4" id="downloadMemo" title="ดาวน์โหลดบันทึกข้อความเสนอผู้อำนวยการ (Word)"><span class="sm:hidden">⬇ Word</span><span class="hidden sm:inline">บันทึกข้อความ (Word)</span></button>
+      <button type="button" class="btn btn-primary px-2 sm:px-4" id="saveRoom"><span class="sm:hidden">บันทึก</span><span class="hidden sm:inline">บันทึกห้องนี้</span></button>
     </div>
   </div>
 </div>
@@ -339,6 +340,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 <script src="assets/config.js"></script>
 <script src="assets/report.js"></script>
+<script src="assets/memo.js"></script>
 <script src="assets/app.js"></script>
 </body>
 </html>
