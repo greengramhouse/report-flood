@@ -213,14 +213,27 @@
     });
   }
 
-  function loadRoster() {
-    if (!STUDENT_API_URL) return Promise.reject(new Error('ยังไม่ได้ตั้ง STUDENT_API_URL ใน config.js'));
-    var hadRoster = state.roster.length > 0;
-    return getJSON(STUDENT_API_URL, {
+  // อ่านรายชื่อจากชีต Roster ใน API_URL ก่อน (เร็วกว่า เพราะมี cache) ถ้าไม่ได้ค่อยไปดึงจาก API ต้นทาง
+  function fetchRosterList() {
+    var opts = {
       onRetry: function (n) {
         if (!state.roster.length) el.roomGrid.innerHTML = loadingHtml('เซิร์ฟเวอร์รายชื่อตอบช้า กำลังลองใหม่ (ครั้งที่ ' + n + ')…');
       }
-    }).then(function (list) {
+    };
+    var direct = function () {
+      if (!STUDENT_API_URL) return Promise.reject(new Error('ยังไม่ได้ตั้ง STUDENT_API_URL ใน config.js'));
+      return getJSON(STUDENT_API_URL, opts);
+    };
+    if (!API_URL) return direct();
+    return apiGet({ action: 'roster' }, { tries: 2, onRetry: opts.onRetry }).then(function (res) {
+      if (!res.students || !res.students.length) throw new Error('ชีต Roster ว่าง');
+      return res.students;
+    }).catch(direct);
+  }
+
+  function loadRoster() {
+    var hadRoster = state.roster.length > 0;
+    return fetchRosterList().then(function (list) {
       if (!Array.isArray(list)) throw new Error('รูปแบบข้อมูลรายชื่อนักเรียนไม่ถูกต้อง');
       var roster = list.map(function (s) {
         var room = String(s.classroom || '').trim();

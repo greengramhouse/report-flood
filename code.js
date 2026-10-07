@@ -8,24 +8,32 @@
  *  3. ทำให้ใช้งานได้ > การทำให้ใช้งานได้รายการใหม่ > ประเภท: เว็บแอป
  *     - เรียกใช้ในฐานะ: ฉัน   - ผู้มีสิทธิ์เข้าถึง: ทุกคน
  *  4. คัดลอก URL ที่ลงท้ายด้วย /exec ไปใส่ใน assets/config.js (API_URL)
+ *  5. (แนะนำ) เรียกใช้ installRosterTrigger 1 ครั้ง ให้ดึงรายชื่อนักเรียนมาเก็บในชีต Roster ทุกวันอัตโนมัติ
  */
+
+// API รายชื่อนักเรียนต้นทาง (ตอบช้า ~5 วินาที จึงดึงมาเก็บไว้ในชีต Roster แล้วให้หน้าเว็บอ่านจากที่นี่แทน)
+var STUDENT_API_URL = 'https://script.google.com/macros/s/AKfycbwGKkKFJhysM4U02sUEd-v01wTCd7pBiHxFcTi7gPNCWybgT1xT6Md3e6bZyWry2eZx/exec';
 
 var SHEET_ROOMS = 'Rooms';
 var SHEET_STUDENTS = 'Students';
 var SHEET_SETTINGS = 'Settings';
+var SHEET_ROSTER = 'Roster';
 
 var HEADERS = {
   Rooms: ['ห้องเรียน', 'ชั้น', 'ครูผู้รายงาน', 'โทรศัพท์', 'วันที่รายงาน', 'จำนวนนักเรียนที่ได้รับผลกระทบ',
     'หนังสือเรียน (คน)', 'อุปกรณ์การเรียน (คน)', 'เครื่องแบบนักเรียน (คน)', 'บันทึกล่าสุด'],
   Students: ['ห้องเรียน', 'ชั้น', 'ที่', 'รหัสนักเรียน', 'เลขประจำตัว 13 หลัก', 'ชื่อ - สกุล',
     'หนังสือเรียน', 'อุปกรณ์การเรียน', 'เครื่องแบบนักเรียน', 'หมายเหตุ', 'ที่มา', 'บันทึกล่าสุด'],
-  Settings: ['key', 'รายการ', 'ค่า']
+  Settings: ['key', 'รายการ', 'ค่า'],
+  // ใช้ชื่อฟิลด์เดียวกับ API ต้นทาง หน้าเว็บจะได้อ่านได้เหมือนเดิม
+  Roster: ['classroom', 'no', 'student_id', 'citizen_id', 'prefix', 'first_name', 'last_name']
 };
 // คอลัมน์ที่ต้องเก็บเป็นข้อความ (กันเลข 0 นำหน้าหาย / เลข 13 หลักกลายเป็น 1.1E+12 / วันที่ถูกแปลง)
 var TEXT_COLS = {
   Rooms: [1, 2, 4, 5, 10],
   Students: [1, 2, 4, 5, 12],
-  Settings: [1, 3]
+  Settings: [1, 3],
+  Roster: [1, 3, 4, 5, 6, 7]
 };
 var SETTINGS = [
   ['directorName', 'ผู้อำนวยการโรงเรียน (ชื่อ - สกุล)'],
@@ -38,7 +46,7 @@ var SETTINGS = [
 // ---------------- ติดตั้ง ----------------
 function setup() {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  [SHEET_ROOMS, SHEET_STUDENTS, SHEET_SETTINGS].forEach(function (name) {
+  [SHEET_ROOMS, SHEET_STUDENTS, SHEET_SETTINGS, SHEET_ROSTER].forEach(function (name) {
     var sh = ss.getSheetByName(name) || ss.insertSheet(name);
     var h = HEADERS[name];
     sh.getRange(1, 1, 1, h.length).setValues([h]).setFontWeight('bold').setBackground('#fde68a');
@@ -62,6 +70,7 @@ function doGet(e) {
   return handle_(function () {
     if (p.action === 'rooms') return cached_('rooms', function () { return { rooms: getRooms_(), settings: getSettings_() }; });
     if (p.action === 'room') return cached_('room:' + str_(p.room), function () { return getRoom_(p.room); });
+    if (p.action === 'roster') return cached_('roster', getRoster_);
     if (p.action === 'all') return cached_('all', function () { return { rooms: getRooms_(), settings: getSettings_(), students: getStudents_() }; });
     return { message: 'API พร้อมใช้งาน' };
   });
@@ -92,6 +101,8 @@ function doPost(e) {
     var body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
     if (body.action === 'save') return saveRoom_(body.data);
     if (body.action === 'saveSettings') return saveSettings_(body.data);
+    // ไม่ส่ง students = ดึงจาก STUDENT_API_URL ใหม่, ส่ง students (array แบบเดียวกับ API ต้นทาง) = เขียนลงชีตตามนั้น
+    if (body.action === 'syncRoster') return syncRoster_(body.students);
     throw new Error('ไม่รู้จักคำสั่ง: ' + body.action);
   });
 }
@@ -252,4 +263,72 @@ function saveSettings_(d) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ---------------- รายชื่อนักเรียน (Roster) ----------------
+// เรียกจากปุ่ม "เรียกใช้" ได้โดยตรง หรือให้ trigger เรียกทุกวัน
+function syncRoster() {
+  var res = syncRoster_();
+  Logger.log('อัปเดตรายชื่อ ' + res.count + ' คน เมื่อ ' + res.syncedAt);
+}
+
+// ตั้ง trigger ดึงรายชื่อทุกวันช่วงตี 5 (เรียกซ้ำได้ จะไม่สร้าง trigger ซ้ำ)
+function installRosterTrigger() {
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    if (t.getHandlerFunction() === 'syncRoster') ScriptApp.deleteTrigger(t);
+  });
+  ScriptApp.newTrigger('syncRoster').timeBased().everyDays(1).atHour(5).create();
+  syncRoster();
+}
+
+function fetchRoster_() {
+  var res = UrlFetchApp.fetch(STUDENT_API_URL, { muteHttpExceptions: true, followRedirects: true });
+  if (res.getResponseCode() !== 200) throw new Error('API รายชื่อนักเรียนตอบกลับ ' + res.getResponseCode());
+  return JSON.parse(res.getContentText());
+}
+
+function syncRoster_(list) {
+  if (list == null) list = fetchRoster_();
+  if (!Array.isArray(list)) throw new Error('รูปแบบข้อมูลรายชื่อนักเรียนไม่ถูกต้อง');
+  var rows = list.filter(function (s) { return s && str_(s.classroom); }).map(function (s) {
+    return HEADERS.Roster.map(function (k) { return k === 'no' ? (Number(s.no) || '') : str_(s[k]); });
+  });
+  // กัน API ต้นทางพังชั่วคราวแล้วส่ง [] มา ทำให้รายชื่อหายทั้งโรงเรียน
+  if (!rows.length) throw new Error('API รายชื่อนักเรียนไม่มีข้อมูล จึงไม่เขียนทับรายชื่อเดิม');
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sh = ss.getSheetByName(SHEET_ROSTER);
+    if (!sh) {
+      sh = ss.insertSheet(SHEET_ROSTER);
+      sh.getRange(1, 1, 1, HEADERS.Roster.length).setValues([HEADERS.Roster]).setFontWeight('bold').setBackground('#fde68a');
+      sh.setFrozenRows(1);
+    }
+    var width = HEADERS.Roster.length;
+    if (sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, Math.max(width, sh.getLastColumn())).clearContent();
+    TEXT_COLS.Roster.forEach(function (c) { sh.getRange(2, c, rows.length, 1).setNumberFormat('@'); });
+    sh.getRange(2, 1, rows.length, width).setValues(rows);
+    var syncedAt = now_();
+    PropertiesService.getScriptProperties().setProperty('rosterSyncedAt', syncedAt);
+    SpreadsheetApp.flush();
+    CacheService.getScriptCache().remove('roster');
+    return { count: rows.length, syncedAt: syncedAt };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function getRoster_() {
+  var sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_ROSTER);
+  // ยังไม่เคยดึงรายชื่อ ดึงให้ครั้งแรกเลย (ครั้งนี้จะช้า ครั้งต่อไปเร็ว)
+  if (!sh || sh.getLastRow() < 2) syncRoster_();
+  var keys = HEADERS.Roster;
+  var students = rows_(sheet_(SHEET_ROSTER)).filter(function (r) { return str_(r[0]); }).map(function (r) {
+    var o = {};
+    keys.forEach(function (k, i) { o[k] = k === 'no' ? (Number(r[i]) || 0) : str_(r[i]); });
+    return o;
+  });
+  return { students: students, syncedAt: PropertiesService.getScriptProperties().getProperty('rosterSyncedAt') || '' };
 }

@@ -23,15 +23,48 @@
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
+  // ---------- ตัดคำไทย ----------
+  // ภาษาไทยไม่มีเว้นวรรคระหว่างคำ โปรแกรมเปิดเอกสารบางตัวจึงตัดบรรทัดได้แค่ตรงช่องว่าง
+  // แล้วกระจายตัวอักษรห่างกัน (thaiDistribute) แทรก ZWSP (มองไม่เห็น) ระหว่างคำให้ตัดบรรทัดตรงคำได้
+  var ZWSP = '\u200B';
+  var THAI = /[\u0E00-\u0E7F]/;
+  // คำที่ Intl.Segmenter ตัดผิด ห้ามตัดกลางคำ
+  var KEEP_WORDS = ['ผลกระทบ', 'อุทกภัย', 'อุดหนุน'];
+  var segmenter = null;
+  try { if (typeof Intl !== 'undefined' && Intl.Segmenter) segmenter = new Intl.Segmenter('th', { granularity: 'word' }); } catch (e) { /* เบราว์เซอร์เก่า ไม่ตัดคำ */ }
+
+  function thaiBreaks(text) {
+    text = String(text == null ? '' : text);
+    if (!segmenter || !THAI.test(text)) return text;
+    var keep = [];
+    KEEP_WORDS.forEach(function (w) {
+      for (var i = text.indexOf(w); i >= 0; i = text.indexOf(w, i + 1)) keep.push([i, i + w.length]);
+    });
+    var out = '', prev = '';
+    Array.from(segmenter.segment(text)).forEach(function (seg) {
+      var at = seg.index;
+      var inside = keep.some(function (k) { return at > k[0] && at < k[1]; });
+      if (prev && !inside && THAI.test(prev.slice(-1)) && THAI.test(seg.segment.charAt(0))) out += ZWSP;
+      out += seg.segment;
+      prev = seg.segment;
+    });
+    return out;
+  }
+
   // ---------- ตัวช่วยสร้าง XML ----------
   function run(text, o) {
     o = o || {};
     var pr = '';
     if (o.b) pr += '<w:b/><w:bCs/>';
     if (o.sz) pr += '<w:sz w:val="' + o.sz * 2 + '"/><w:szCs w:val="' + o.sz * 2 + '"/>';
-    return '<w:r>' + (pr ? '<w:rPr>' + pr + '</w:rPr>' : '') + '<w:t xml:space="preserve">' + esc(text) + '</w:t></w:r>';
+    if (o.dotted) pr += '<w:u w:val="dotted"/>';
+    // nobreak: ห้ามตัดบรรทัดกลางข้อความนี้ (ไม่แทรก ZWSP และเปลี่ยนช่องว่างเป็น no-break space)
+    var t = o.nobreak ? String(text == null ? '' : text).replace(/ /g, '\u00A0') : thaiBreaks(text);
+    return '<w:r>' + (pr ? '<w:rPr>' + pr + '</w:rPr>' : '') + '<w:t xml:space="preserve">' + esc(t) + '</w:t></w:r>';
   }
   function tab() { return '<w:r><w:tab/></w:r>'; }
+  // แท็บที่มีเส้นประใต้ ใช้ลากเส้นประต่อจากข้อความไปจนถึงตำแหน่งแท็บ
+  function dottedTab() { return '<w:r><w:rPr><w:u w:val="dotted"/></w:rPr><w:tab/></w:r>'; }
   function para(runs, o) {
     o = o || {};
     var pr = '';
@@ -95,14 +128,16 @@
     // หัวบันทึก: ครุฑ + "บันทึกข้อความ"
     x.push(para([image(img.rid, img.cx, img.cy), tab(), run('บันทึกข้อความ', { b: true, sz: 29 })],
       { tabs: [{ val: 'center', pos: MID }] }));
-    x.push(para([run('ส่วนราชการ', { b: true, sz: 20 }), run('  ' + schoolName + '  ' + affiliation), tab()],
-      { tabs: [{ val: 'right', pos: TEXT_W, leader: 'dot' }], before: 120 }));
-    x.push(para([run('ที่', { b: true, sz: 20 }), run('  ' + (d.docNo || '')), tab(), run('วันที่', { b: true, sz: 20 }),
-      run('  ' + (d.dateText || '')), tab()],
-      { tabs: [{ val: 'left', pos: MID, leader: 'dot' }, { val: 'right', pos: TEXT_W, leader: 'dot' }] }));
+    // ข้อความหัวบันทึกอยู่บนเส้นประ (ขีดเส้นใต้แบบจุด) แล้วลากเส้นประต่อจนสุดบรรทัด ตามแบบหนังสือราชการ
+    x.push(para([run('ส่วนราชการ', { b: true, sz: 20 }), run('  ' + schoolName + '  ' + affiliation, { dotted: true }), dottedTab()],
+      { tabs: [{ val: 'right', pos: TEXT_W }], before: 120 }));
+    x.push(para([run('ที่', { b: true, sz: 20 }), run('  ' + (d.docNo || ''), { dotted: true }), dottedTab(),
+      run('วันที่', { b: true, sz: 20 }), run('  ' + (d.dateText || ''), { dotted: true }), dottedTab()],
+      { tabs: [{ val: 'left', pos: MID }, { val: 'right', pos: TEXT_W }] }));
     x.push(para([run('เรื่อง', { b: true, sz: 20 }),
-      run('  รายงานผลการตรวจสอบความเสียหายของนักเรียนที่ได้รับผลกระทบจากเหตุอุทกภัย ' + cls)],
-      { indLeft: 850, hanging: 850 }));
+      run('  รายงานผลการตรวจสอบความเสียหายของนักเรียนที่ได้รับผลกระทบจากเหตุอุทกภัย ', { dotted: true }),
+      run(cls, { dotted: true, nobreak: true }), dottedTab()],
+      { indLeft: 850, hanging: 850, tabs: [{ val: 'right', pos: TEXT_W }] }));
     x.push(para(run('เรียน  ผู้อำนวยการ' + schoolName), { before: 240, after: 120 }));
 
     // ย่อหน้า 1: ที่มา
@@ -163,7 +198,7 @@
 
   function table(hits, c, classLabel) {
     var W = [600, 2971, 850, 1150, 1150, 1250, 1100];    // รวม = TEXT_W (9071)
-    var head = ['ที่', 'ชื่อ - สกุล', 'ชั้น', 'หนังสือเรียน', 'อุปกรณ์การเรียน', 'เครื่องแบบนักเรียน', 'หมายเหตุ'];
+    var head = ['ที่', 'ชื่อ - สกุล', 'ชั้น', 'หนังสือ', 'อุปกรณ์', 'เครื่องแบบ', 'หมายเหตุ'];
     var mark = '✓';
     var rows = [];
     rows.push('<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>' + head.map(function (h, i) {
