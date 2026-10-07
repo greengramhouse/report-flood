@@ -130,29 +130,53 @@
   }
 
   // ---------------- API ----------------
-  // GET พร้อม timeout และลองใหม่อัตโนมัติ (Apps Script ตอบช้า/ต่อคิวเมื่อหลายคนเปิดพร้อมกัน)
+  // GET พร้อม timeout และลองใหม่อัตโนมัติ
+  // Apps Script บางครั้งค้างทั้งคำขอ (redirect ไป script.googleusercontent.com แล้วไม่ตอบเลย) ทั้งที่คำขอใหม่ตอบใน 1-3 วินาที
+  // จึงไม่รอให้คำขอที่ค้างหมดเวลา: ถ้า HEDGE_MS แล้วยังไม่ตอบ ยิงคำขอใหม่ขนานไป ใช้คำตอบที่มาก่อน (ทำเฉพาะ GET เพราะยิงซ้ำได้)
+  var HEDGE_MS = 6000;
   function getJSON(url, opts) {
     opts = opts || {};
     var tries = opts.tries || 3, timeout = opts.timeout || 30000;
-    var attempt = function (n) {
-      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
-      var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeout) : null;
-      return fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function (r) {
-        if (!r.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับ ' + r.status);
-        return r.json();
-      }).then(function (j) {
-        clearTimeout(timer);
-        return j;
-      }, function (err) {
-        clearTimeout(timer);
-        if (n + 1 >= tries) throw (err && err.name === 'AbortError') ? new Error('เซิร์ฟเวอร์ตอบช้าเกินไป') : err;
-        if (opts.onRetry) opts.onRetry(n + 1);
-        // รอแบบสุ่มเล็กน้อย กันทุกเครื่องยิงซ้ำพร้อมกัน
-        return new Promise(function (res) { setTimeout(res, 1000 * (n + 1) + Math.random() * 1000); })
-          .then(function () { return attempt(n + 1); });
-      });
-    };
-    return attempt(0);
+    return new Promise(function (resolve, reject) {
+      var ctrls = [], started = 0, failed = 0, done = false, timedOut = false, lastErr = null, hedge = null;
+      var finish = function (ok, value) {
+        if (done) return;
+        done = true;
+        clearTimeout(hedge);
+        ctrls.forEach(function (c) { if (c) c.abort(); });   // ยกเลิกคำขอที่ยังค้างอยู่
+        if (ok) resolve(value); else reject(value);
+      };
+      var launch = function () {
+        if (done || started >= tries) return;
+        var n = started++;
+        if (n > 0 && opts.onRetry) opts.onRetry(n);
+        var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+        ctrls.push(ctrl);
+        var timer = ctrl ? setTimeout(function () { ctrl.abort(); }, timeout) : null;
+        fetch(url, ctrl ? { signal: ctrl.signal } : {}).then(function (r) {
+          if (!r.ok) throw new Error('เซิร์ฟเวอร์ตอบกลับ ' + r.status);
+          return r.json();
+        }).then(function (j) {
+          clearTimeout(timer);
+          finish(true, j);
+        }, function (err) {
+          clearTimeout(timer);
+          if (done) return;
+          failed++;
+          lastErr = err;
+          if (err && err.name === 'AbortError') timedOut = true;
+          if (failed >= tries) return finish(false, timedOut ? new Error('เซิร์ฟเวอร์ตอบช้าเกินไป') : lastErr);
+          // ล้มเร็ว (เช่น 404) และไม่มีคำขออื่นค้างอยู่ ลองใหม่เลยหลังรอสุ่มสั้น ๆ กันทุกเครื่องยิงพร้อมกัน
+          if (failed === started) {
+            clearTimeout(hedge);
+            hedge = setTimeout(launch, 500 + Math.random() * 1000);
+          }
+        });
+        clearTimeout(hedge);
+        hedge = setTimeout(launch, HEDGE_MS);
+      };
+      launch();
+    });
   }
   function apiGet(params, opts) {
     var q = Object.keys(params).map(function (k) { return k + '=' + encodeURIComponent(params[k]); }).join('&');
@@ -172,6 +196,9 @@
 
   // ---------------- cache ในเครื่อง (เปิดครั้งต่อไปแสดงห้องได้ทันที) ----------------
   var ROSTER_KEY = 'flood:roster:v1:' + STUDENT_API_URL;
+  // สถานะการส่งรายห้อง (ใช้แสดงผลทันทีตอนเปิดหน้าเท่านั้น ยังถือว่า "ยังไม่ได้ตรวจกับเซิร์ฟเวอร์" จนกว่าจะโหลดใหม่สำเร็จ)
+  var ROOMS_KEY = 'flood:rooms:v1:' + API_URL;
+  function saveRoomsCache() { writeCache(ROOMS_KEY, { savedAt: Date.now(), rooms: state.rooms, settings: state.settings }); }
   function readCache(key) {
     try { var v = localStorage.getItem(key); return v ? JSON.parse(v) : null; } catch (e) { return null; }
   }
@@ -261,6 +288,7 @@
       (res.rooms || []).forEach(function (r) { state.rooms[r.room] = r; });
       state.settings = res.settings || {};
       state.roomsLoaded = true;
+      saveRoomsCache();
       fillSettings();
       renderRoomGrid();
       renderStatus();
@@ -287,6 +315,14 @@
     applyOfflineState();
     $('schoolDate').value = todayISO();
     // 1) ใช้รายชื่อที่จำไว้ในเครื่องก่อน (ถ้ามี) ห้องจะขึ้นทันที
+    // สถานะการส่งที่จำไว้ แสดงได้เลย แต่ roomsLoaded ยังเป็น false
+    // ตอนเลือกห้องจึงยังโหลดข้อมูลล่าสุดจากเซิร์ฟเวอร์เสมอ กันบันทึกทับห้องที่คนอื่นเพิ่งส่ง
+    var cachedRooms = API_URL ? readCache(ROOMS_KEY) : null;
+    if (cachedRooms && cachedRooms.rooms) {
+      state.rooms = cachedRooms.rooms;
+      state.settings = cachedRooms.settings || {};
+      fillSettings();
+    }
     var cached = readCache(ROSTER_KEY);
     if (cached && Array.isArray(cached.roster) && cached.roster.length) {
       setRoster(cached.roster);
@@ -660,6 +696,7 @@
       withBusy($('saveRoom'), 'กำลังบันทึก…', apiPost({ action: 'save', data: data })).then(function (res) {
         state.dirty = false;
         state.rooms[data.room] = res.room;
+        saveRoomsCache();
         state.roomUnverified = false;
         renderRoomGrid();
         renderStatus();
