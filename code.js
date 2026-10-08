@@ -36,7 +36,7 @@ var HEADERS = {
   Settings: ['key', 'รายการ', 'ค่า'],
   // ใช้ชื่อฟิลด์เดียวกับ API ต้นทาง หน้าเว็บจะได้อ่านได้เหมือนเดิม
   Roster: ['classroom', 'no', 'student_id', 'citizen_id', 'prefix', 'first_name', 'last_name'],
-  Photos: ['ห้องเรียน', 'fileId', 'ชื่อไฟล์', 'ลิงก์', 'รูปย่อ', 'อัปโหลดเมื่อ']
+  Photos: ['ห้องเรียน', 'fileId', 'ชื่อไฟล์', 'ลิงก์', 'รูปย่อ', 'อัปโหลดเมื่อ', 'คำอธิบายภาพ']
 };
 // คอลัมน์ที่ต้องเก็บเป็นข้อความ (กันเลข 0 นำหน้าหาย / เลข 13 หลักกลายเป็น 1.1E+12 / วันที่ถูกแปลง)
 var TEXT_COLS = {
@@ -44,7 +44,7 @@ var TEXT_COLS = {
   Students: [1, 2, 4, 5, 12],
   Settings: [1, 3],
   Roster: [1, 3, 4, 5, 6, 7],
-  Photos: [1, 2, 3, 4, 5, 6]
+  Photos: [1, 2, 3, 4, 5, 6, 7]
 };
 var SETTINGS = [
   ['directorName', 'ผู้อำนวยการโรงเรียน (ชื่อ - สกุล)'],
@@ -121,6 +121,7 @@ function doPost(e) {
     if (body.action === 'syncRoster') return syncRoster_(body.students);
     if (body.action === 'uploadPhoto') return uploadPhoto_(body.data);
     if (body.action === 'deletePhoto') return deletePhoto_(body.data);
+    if (body.action === 'captionPhoto') return captionPhoto_(body.data);
     throw new Error('ไม่รู้จักคำสั่ง: ' + body.action);
   });
 }
@@ -368,7 +369,42 @@ function getRoster_() {
 
 // ---------------- รูปภาพสภาพน้ำท่วม ----------------
 function photoFromRow_(r) {
-  return { room: str_(r[0]), id: str_(r[1]), name: str_(r[2]), url: str_(r[3]), thumb: str_(r[4]), uploadedAt: str_(r[5]) };
+  return { room: str_(r[0]), id: str_(r[1]), name: str_(r[2]), url: str_(r[3]), thumb: str_(r[4]), uploadedAt: str_(r[5]), caption: str_(r[6]) };
+}
+
+var MAX_CAPTION = 150;
+
+function cleanCaption_(v) {
+  return str_(v).replace(/[\r\n\t]+/g, ' ').replace(/\s{2,}/g, ' ').slice(0, MAX_CAPTION);
+}
+
+// ชีต Photos ที่สร้างก่อนมีคำอธิบายภาพ ยังไม่มีหัวคอลัมน์ G เติมให้
+function ensurePhotoCaptionHeader_(sh) {
+  var col = HEADERS.Photos.length;
+  if (str_(sh.getRange(1, col).getValue()) !== HEADERS.Photos[col - 1]) {
+    sh.getRange(1, col).setValue(HEADERS.Photos[col - 1]).setFontWeight('bold').setBackground('#fde68a');
+  }
+}
+
+// บันทึกคำอธิบายภาพ (เว้นว่าง = ใช้แค่ "ภาพที่ n" ในบันทึกข้อความ)
+function captionPhoto_(d) {
+  if (!d) throw new Error('ไม่มีข้อมูล');
+  var room = str_(d.room), id = str_(d.id), caption = cleanCaption_(d.caption);
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var sh = ensureSheet_(SHEET_PHOTOS);
+    ensurePhotoCaptionHeader_(sh);
+    var idx = -1;
+    rows_(sh).some(function (r, i) { if (str_(r[0]) === room && str_(r[1]) === id) { idx = i; return true; } return false; });
+    if (idx < 0) throw new Error('ไม่พบรูปนี้ในห้อง ' + room);
+    sh.getRange(idx + 2, HEADERS.Photos.length).setNumberFormat('@').setValue(caption);
+    SpreadsheetApp.flush();
+    CacheService.getScriptCache().remove('photos:' + room);
+    return { id: id, caption: caption };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // นับรูปของห้องจากคอลัมน์ห้องอย่างเดียว (ไม่อ่านรูปย่อทั้งชีต เร็วกว่า getPhotos_)
@@ -498,13 +534,14 @@ function uploadPhoto_(d) {
   var blob = Utilities.newBlob(Utilities.base64Decode(data), str_(d.mimeType), name);
   var folder = roomFolder_(room);
   var file = folder.createFile(blob);
-  var row = [room, file.getId(), name, file.getUrl(), thumb, now];
+  var row = [room, file.getId(), name, file.getUrl(), thumb, now, cleanCaption_(d.caption)];
 
   var lock = LockService.getScriptLock();
   try {
     lock.waitLock(30000);
     // นับจำนวนใน lock กันอัปห้องเดียวกันพร้อมกันหลายรูปจนเกิน MAX_PHOTOS
     var sh = ensureSheet_(SHEET_PHOTOS);
+    ensurePhotoCaptionHeader_(sh);
     if (countPhotos_(sh, room) >= MAX_PHOTOS) throw new Error(full);
     var target = sh.getLastRow() + 1;
     sh.getRange(target, 1, 1, row.length).setNumberFormat('@').setValues([row]);

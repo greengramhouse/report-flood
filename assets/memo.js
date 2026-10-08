@@ -199,8 +199,10 @@
       x.push('<w:p><w:r><w:br w:type="page"/></w:r></w:p>');
       x.push(para(run('ภาพประกอบ สภาพความเสียหายจากเหตุอุทกภัย ' + cls, { b: true, sz: 18 }), { jc: 'center', after: 120 }));
       img.photos.forEach(function (p, i) {
-        x.push(para([image(p.rid, p.cx, p.cy, i + 2, 'ภาพที่ ' + (i + 1))], { jc: 'center', before: 120, keepNext: true }));
-        x.push(para(run('ภาพที่ ' + (i + 1)), { jc: 'center', after: 120 }));
+        // คำอธิบายภาพที่ครูพิมพ์เอง ถ้าไม่มีใช้แค่ลำดับภาพ
+        var label = 'ภาพที่ ' + (i + 1) + (p.caption ? ' ' + p.caption : '');
+        x.push(para([image(p.rid, p.cx, p.cy, i + 2, label)], { jc: 'center', before: 120, keepNext: true }));
+        x.push(para(run(label), { jc: 'center', after: 120 }));
       });
     }
     return x.join('');
@@ -318,7 +320,7 @@
    * @param garuda  ArrayBuffer/Buffer ของไฟล์ครุฑ (PNG)
    * @param d { schoolName, affiliation, classLabel, totalStudents, teacherName, teacherPhone, directorName,
    *            dateText, docNo, students:[{name, classLabel?, book, supplies, uniform, note}],  (เฉพาะคนที่ได้รับผลกระทบ)
-   *            photos?:[{data, w, h, ext}] }  ภาพประกอบ (data = ArrayBuffer/Uint8Array, ext = 'jpg' | 'png')
+   *            photos?:[{data, w, h, ext, caption?}] }  ภาพประกอบ (data = ArrayBuffer/Uint8Array, ext = 'jpg' | 'png')
    * @param outType 'blob' (เบราว์เซอร์) หรือ 'nodebuffer'
    */
   function build(JSZip, garuda, d, outType) {
@@ -329,7 +331,7 @@
     var photos = (d.photos || []).map(function (p, i) {
       var k = Math.min(14 * EMU_CM / p.w, 10.5 * EMU_CM / p.h);
       return { rid: 'rIdP' + (i + 1), target: 'media/photo' + (i + 1) + '.' + p.ext, data: p.data,
-        cx: Math.round(p.w * k), cy: Math.round(p.h * k) };
+        cx: Math.round(p.w * k), cy: Math.round(p.h * k), caption: String(p.caption || '').trim() };
     });
     var zip = new JSZip();
     zip.file('[Content_Types].xml', CONTENT_TYPES);

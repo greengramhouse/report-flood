@@ -754,7 +754,7 @@
     withBusy($('downloadRoom'), 'กำลังสร้างไฟล์…',
       buildAndDownload(data, 'แบบรายงานอุทกภัย_' + fileSafe(p.room) + (SCHOOL.name ? '_' + fileSafe(SCHOOL.name) : '') + '.xlsx'))
       .then(function () {
-        if (state.dirty && API_URL) toast('ดาวน์โหลดแล้ว อย่าลืมกด "บันทึกห้องนี้" ด้วย', 'info');
+        if (state.dirty && API_URL) toast('ดาวน์โหลดแล้ว อย่าลืมกด "บันทึกข้อมูล" ด้วย', 'info');
       }).catch(function (err) { toast('สร้างไฟล์ไม่สำเร็จ: ' + err.message, 'error'); });
   });
 
@@ -773,6 +773,10 @@
     // รูปไม่บังคับ ไม่ต้องรอนาน ถ้าช้าให้ครูกดลองใหม่เอง
     return apiGet({ action: 'photos', room: room }, { tries: 2, timeout: 15000 }).then(function (res) {
       var list = res.photos || [];
+      // คำอธิบายที่กำลังพิมพ์/ยังไม่ได้บันทึก อย่าให้ค่าจากเซิร์ฟเวอร์ทับ
+      list.forEach(function (p) {
+        if (capDirty[p.id]) p.caption = capDirty[p.id].text;
+      });
       if (state.room === room) {
         state.photos = list;
         state.photosLoaded = true;
@@ -813,27 +817,93 @@
     }
     var mine = uploads.filter(function (u) { return u.room === state.room; });
     var pending = mine.length;
+    // จำช่องคำอธิบายที่กำลังพิมพ์ไว้ วาดใหม่แล้วคืน focus/ตำแหน่งเคอร์เซอร์ (ตอนรูปอื่นอัปเสร็จจะวาดใหม่ทั้งกริด)
+    var act = document.activeElement;
+    var focusId = act && act.dataset && act.dataset.cap;
+    var selS = focusId ? act.selectionStart : 0, selE = focusId ? act.selectionEnd : 0;
+
     var html = state.photos.map(function (p, i) {
-      var img = p.thumb ? '<img src="' + esc(p.thumb) + '" alt="รูปที่ ' + (i + 1) + '" loading="lazy">'
-        : '<span class="photo-ph">รูปที่ ' + (i + 1) + '</span>';
+      var no = 'ภาพที่ ' + (i + 1);
+      var img = p.thumb ? '<img src="' + esc(p.thumb) + '" alt="' + no + '" loading="lazy">'
+        : '<span class="photo-ph">' + no + '</span>';
       // กำลังลบ: ไม่มีปุ่ม × และลิงก์ กันกดซ้ำ
       if (deleting[p.id]) {
-        return '<div class="photo deleting">' + img + '<div class="del-state"><span class="spin"></span>กำลังลบ…</div></div>';
+        return '<div class="photo deleting"><div class="ph-img">' + img + '<div class="del-state"><span class="spin"></span>กำลังลบ…</div></div>' +
+          '<div class="ph-cap"><span class="cap-no">' + no + '</span></div></div>';
       }
-      return '<div class="photo"><a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="เปิดรูปใน Google Drive">' + img +
-        '</a><button type="button" class="del" data-del="' + esc(p.id) + '" aria-label="ลบรูปที่ ' + (i + 1) + '">×</button></div>';
+      var st = capStatus[p.id] || {};
+      return '<div class="photo"><div class="ph-img"><a href="' + esc(p.url) + '" target="_blank" rel="noopener" title="เปิดรูปใน Google Drive">' + img +
+        '</a><span class="ph-no">' + (i + 1) + '</span>' +
+        '<button type="button" class="del" data-del="' + esc(p.id) + '" aria-label="ลบ' + no + '">×</button></div>' +
+        '<label class="ph-cap"><span class="cap-no">' + no + '<span class="cap-st' + (st.err ? ' err' : '') + '" data-capst="' + esc(p.id) + '">' + esc(st.text || '') + '</span></span>' +
+        '<textarea class="cap-in" rows="2" maxlength="' + MAX_CAPTION + '" data-cap="' + esc(p.id) + '" placeholder="คำอธิบายภาพ (ไม่บังคับ)" ' +
+        'aria-label="คำอธิบาย' + no + '">' + esc(p.caption || '') + '</textarea></label></div>';
     }).join('');
     html += mine.map(function (u) {
-      return '<div class="photo pending" data-up="' + u.key + '"><img src="' + u.preview + '" alt="">' +
-        '<div class="up"><span class="up-txt">' + esc(u.stage) + '</span><div class="bar"><span style="width:' + u.pct + '%"></span></div></div></div>';
+      return '<div class="photo pending" data-up="' + u.key + '"><div class="ph-img"><img src="' + u.preview + '" alt="">' +
+        '<div class="up"><span class="up-txt">' + esc(u.stage) + '</span><div class="bar"><span style="width:' + u.pct + '%"></span></div></div></div>' +
+        '<div class="ph-cap"><span class="cap-no">รอใส่คำอธิบายหลังอัปโหลดเสร็จ</span></div></div>';
     }).join('');
     if (state.photos.length + pending < MAX_PHOTOS) {
-      html += '<button type="button" class="photo-add" id="photoAdd"><b>+</b><span>เพิ่มรูป</span></button>';
+      html += '<button type="button" class="photo-add" id="photoAdd"><b>+</b><span>เพิ่มรูป</span><small>ห้องละไม่เกิน ' + MAX_PHOTOS + ' รูป</small></button>';
     }
     grid.innerHTML = html;
+    if (focusId) {
+      var again = grid.querySelector('[data-cap="' + focusId + '"]');
+      if (again) { again.focus({ preventScroll: true }); try { again.setSelectionRange(selS, selE); } catch (e) { /* ไม่เป็นไร */ } }
+    }
     msg.hidden = !state.photos.length;
-    msg.textContent = 'อัปโหลดแล้ว ' + state.photos.length + ' รูป' + (state.photos.length >= MAX_PHOTOS ? ' (ครบจำนวนแล้ว)' : '');
+    msg.textContent = 'อัปโหลดแล้ว ' + state.photos.length + ' รูป' + (state.photos.length >= MAX_PHOTOS ? ' (ครบจำนวนแล้ว)' : '') +
+      ' · ถ้าไม่ใส่คำอธิบาย ในไฟล์ Word จะแสดงเป็น "ภาพที่ 1, ภาพที่ 2, …"';
   }
+
+  // ---- คำอธิบายภาพ: พิมพ์แล้วบันทึกเองอัตโนมัติ (หยุดพิมพ์ 1.2 วิ หรือออกจากช่อง) ----
+  var MAX_CAPTION = 150;
+  var capDirty = {};    // id -> { room, text } ที่ยังไม่ได้บันทึก (จำห้องไว้ เผื่อครูเปลี่ยนห้องก่อนบันทึกเสร็จ)
+  var capTimers = {};
+  var capStatus = {};   // id -> { text, err }
+
+  function setCapStatus(id, text, err) {
+    capStatus[id] = { text: text, err: !!err };
+    var el2 = $('photoGrid').querySelector('[data-capst="' + id + '"]');
+    if (el2) { el2.textContent = text; el2.classList.toggle('err', !!err); }
+  }
+
+  function saveCaption(id) {
+    clearTimeout(capTimers[id]);
+    var d = capDirty[id];
+    if (!d) return Promise.resolve();
+    var text = String(d.text || '').trim();
+    setCapStatus(id, 'กำลังบันทึก…');
+    return apiPost({ action: 'captionPhoto', data: { room: d.room, id: id, caption: text } }).then(function () {
+      // ระหว่างส่ง ถ้าพิมพ์ต่อ ยังถือว่าไม่ได้บันทึก
+      if (capDirty[id] && String(capDirty[id].text || '').trim() === text) delete capDirty[id];
+      setCapStatus(id, 'บันทึกแล้ว ✓');
+      setTimeout(function () { if (capStatus[id] && capStatus[id].text === 'บันทึกแล้ว ✓') setCapStatus(id, ''); }, 2500);
+    }, function () {
+      setCapStatus(id, 'บันทึกไม่สำเร็จ แตะช่องแล้วออกเพื่อลองใหม่', true);
+    });
+  }
+
+  function saveAllCaptions() {
+    return Promise.all(Object.keys(capDirty).map(saveCaption));
+  }
+
+  $('photoGrid').addEventListener('input', function (e) {
+    var id = e.target.dataset && e.target.dataset.cap;
+    if (!id) return;
+    var p = state.photos.filter(function (x) { return x.id === id; })[0];
+    if (!p) return;
+    p.caption = e.target.value;
+    capDirty[id] = { room: state.room, text: e.target.value };
+    setCapStatus(id, 'ยังไม่บันทึก…');
+    clearTimeout(capTimers[id]);
+    capTimers[id] = setTimeout(function () { saveCaption(id); }, 1200);
+  });
+  $('photoGrid').addEventListener('focusout', function (e) {
+    var id = e.target.dataset && e.target.dataset.cap;
+    if (id && capDirty[id]) saveCaption(id);
+  });
 
   function loadImage(src) {
     return new Promise(function (resolve, reject) {
@@ -1022,10 +1092,16 @@
     // รายการรูปยังโหลดไม่เสร็จ/โหลดไม่สำเร็จ โหลดก่อน ไม่งั้นไฟล์ Word จะไม่มีรูปโดยไม่มีใครรู้
     var listed = !API_URL || state.photosLoaded ? Promise.resolve(state.photos) : fetchPhotos(room);
     return listed.then(function (photos) {
-      return Promise.all(photos.map(photoForMemo));
+      return Promise.all(photos.map(function (p) {
+        // คำอธิบายใช้ค่าล่าสุดในหน้าจอ (รวมที่ยังบันทึกไม่เสร็จ)
+        var caption = capDirty[p.id] ? capDirty[p.id].text : p.caption;
+        return photoForMemo(p).then(function (d) { return d ? { d: d, caption: String(caption || '').trim() } : null; });
+      }));
     }).then(function (list) {
       if (missing && state.room === room) fetchPhotos(room).catch(function () { /* ไม่เป็นไร */ });
-      var out = list.filter(Boolean).map(function (d) { return { data: b64ToBytes(d.b64), w: d.w, h: d.h, ext: d.ext }; });
+      var out = list.filter(Boolean).map(function (x) {
+        return { data: b64ToBytes(x.d.b64), w: x.d.w, h: x.d.h, ext: x.d.ext, caption: x.caption };
+      });
       out.missing = missing;   // ให้ผู้เรียกแจ้งเตือนรวมกับข้อความอื่น (toast ซ้อนกันจะเห็นแค่อันสุดท้าย)
       return out;
     });
@@ -1052,6 +1128,7 @@
       toast('กำลังอัปโหลดรูปอยู่ รอให้เสร็จก่อนแล้วค่อยดาวน์โหลด', 'info');
       return;
     }
+    saveAllCaptions();   // ส่งคำอธิบายที่ค้างไว้ขึ้นระบบด้วย (ไฟล์ Word ใช้ค่าบนหน้าจออยู่แล้ว ไม่ต้องรอ)
     var p = roomPayload();
     var label = classLabel(p.room);
     var missingPhotos = 0;
@@ -1092,7 +1169,7 @@
       if (missingPhotos) toast('ดาวน์โหลดแล้ว แต่มี ' + missingPhotos + ' รูปที่โหลดไม่ได้ (อาจถูกลบใน Google Drive) ไฟล์ Word จึงไม่มีรูปนั้น', 'info');
       else if (!p.teacherName) toast('ดาวน์โหลดแล้ว ยังไม่ได้กรอกชื่อครูผู้รายงาน ในไฟล์จะเป็นจุดไข่ปลา', 'info');
       else if (!data.directorName) toast('ดาวน์โหลดแล้ว ชื่อผู้อำนวยการยังว่าง (กรอกได้ในหน้า "สรุปทั้งโรงเรียน")', 'info');
-      else if (state.dirty && API_URL) toast('ดาวน์โหลดแล้ว อย่าลืมกด "บันทึกห้องนี้" ด้วย', 'info');
+      else if (state.dirty && API_URL) toast('ดาวน์โหลดแล้ว อย่าลืมกด "บันทึกข้อมูล" ด้วย', 'info');
     }).catch(function (err) { toast('สร้างไฟล์ไม่สำเร็จ: ' + err.message, 'error'); });
   });
 
@@ -1217,7 +1294,7 @@
   }, { passive: true });
 
   window.addEventListener('beforeunload', function (e) {
-    if (state.dirty) { e.preventDefault(); e.returnValue = ''; }
+    if (state.dirty || Object.keys(capDirty).length) { e.preventDefault(); e.returnValue = ''; }
   });
 
   // ---------------- start ----------------
